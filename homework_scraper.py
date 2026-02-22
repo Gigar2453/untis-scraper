@@ -13,7 +13,6 @@ FACH_NAMEN = {
     "LA": "Latein", "SN": "Spanisch", "AG": "AG"
 }
 
-# 1. Die Mail-Funktion (Jetzt mit HTML-Unterstützung!)
 def send_mail(report_html):
     msg = EmailMessage()
     heute = datetime.date.today()
@@ -21,10 +20,7 @@ def send_mail(report_html):
     msg['From'] = os.getenv("EMAIL_SENDER")
     msg['To'] = os.getenv("EMAIL_RECEIVER")
     
-    # Fallback für uralte Mail-Clients, die kein HTML können
     msg.set_content("Bitte aktiviere HTML in deinem E-Mail-Programm, um das Dashboard zu sehen.")
-    
-    # Das hübsche Dark-Mode HTML einsetzen
     msg.add_alternative(report_html, subtype='html')
 
     try:
@@ -39,7 +35,6 @@ def send_mail(report_html):
 def extract_homework_text(raw_text):
     start_idx = raw_text.find("Bald fällig")
     if start_idx == -1:
-        # Basis-HTML für Fehlermeldungen, damit die Mail nicht kaputt geht
         return f'<div style="background:#222; color:#fff; padding:20px;"><h3>Fehler: Bereich "Bald fällig" nicht gefunden.</h3><pre style="color:#ff5555;">{raw_text[:1000]}</pre></div>'
         
     end_idx = raw_text.find("Verpasst", start_idx)
@@ -70,21 +65,59 @@ def extract_homework_text(raw_text):
                 "text": text
             })
 
+    heute = datetime.date.today()
+    heute_str = heute.strftime("%d.%m.%Y")
+    
+    # Wenn wirklich GAR NICHTS im System steht (Ferien etc.)
     if not hw_list:
-        return f'<div style="background:#222; color:#fff; padding:20px;"><h3>Aktuell keine Hausaufgaben gefunden.</h3><pre style="color:#aaa;">{target_text}</pre></div>'
+        return f'<div style="background:#121212; color:#fff; padding:20px;"><h3>🎉 Keine einzige Aufgabe im System. Zurücklehnen!</h3></div>'
 
     # --- DIE SORTIERUNG ---
-    heute_str = datetime.date.today().strftime("%d.%m.%Y")
     heute_neu = []
     weitere_aufgaben = []
-    
     for hw in hw_list:
         if hw["aufgabe_datum"] == heute_str:
             heute_neu.append(hw)
         else:
             weitere_aufgaben.append(hw)
 
-    # --- DAS NEUE, CLEANE E-MAIL-DESIGN (HTML ZUSAMMENBAU) ---
+    # --- KALENDER-LOGIK: Montag bis Freitag generieren ---
+    if heute.weekday() >= 5: # Samstag/Sonntag -> Fokus auf nächste Woche
+        montag = heute + datetime.timedelta(days=(7 - heute.weekday()))
+    else: # Montag bis Freitag -> Fokus auf aktuelle Woche
+        montag = heute - datetime.timedelta(days=heute.weekday())
+        
+    tage_namen = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+    hw_by_date = {}
+    
+    # 1. Platzhalter für Montag bis Freitag erstellen
+    for i in range(5):
+        d = montag + datetime.timedelta(days=i)
+        datum_str = d.strftime("%d.%m.%Y")
+        tag_name = tage_namen[d.weekday()]
+        anzeige_titel = f"{tag_name}, {datum_str}"
+        hw_by_date[datum_str] = {"titel": anzeige_titel, "aufgaben": [], "date_obj": d}
+
+    # 2. Die gefundenen Aufgaben einsortieren
+    for hw in weitere_aufgaben:
+        # hw["faellig_datum"] ist z.B. "Montag, 23.02.2026" -> Wir wollen nur "23.02.2026"
+        datum_nur = hw["faellig_datum"].split(",")[-1].strip()
+        
+        # Falls eine Aufgabe außerhalb von Mo-Fr liegt (z.B. in 2 Wochen), fügen wir den Tag hinzu
+        if datum_nur not in hw_by_date:
+            try:
+                d_obj = datetime.datetime.strptime(datum_nur, "%d.%m.%Y").date()
+            except:
+                d_obj = datetime.date.max 
+            hw_by_date[datum_nur] = {"titel": hw["faellig_datum"], "aufgaben": [], "date_obj": d_obj}
+            
+        hw_by_date[datum_nur]["aufgaben"].append(hw)
+
+    # Nach Datum sortieren, damit alles in der richtigen Reihenfolge bleibt
+    sorted_dates = sorted(hw_by_date.keys(), key=lambda k: hw_by_date[k]["date_obj"])
+
+
+    # --- DAS E-MAIL-DESIGN (HTML ZUSAMMENBAU) ---
     html = f"""
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #121212; color: #e0e0e0; padding: 20px; line-height: 1.5;">
         <div style="max-width: 650px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333333; border-radius: 6px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
@@ -104,7 +137,6 @@ def extract_homework_text(raw_text):
     """
     if heute_neu:
         for hw in heute_neu:
-            # Wir formatieren den Text etwas, damit Zeilenumbrüche in HTML funktionieren
             safe_text = hw['text'].replace('\n', '<br>')
             html += f'<p style="margin: 0 0 10px 0; color: #d0d0d0; font-size: 14px;">-> <b style="color:#ffffff;">[{hw["fach"]}]</b> (Fällig am {hw["faellig_datum"]}):<br>{safe_text}</p>'
     else:
@@ -114,23 +146,30 @@ def extract_homework_text(raw_text):
     # Sektion: Weitere fällige Aufgaben
     html += """
                 <h3 style="margin: 0 0 20px 0; color: #ffffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #444444; padding-bottom: 8px;">
-                    📅 Weitere fällige Aufgaben
+                    📅 Übersicht (Aktuelle Woche)
                 </h3>
     """
-    if weitere_aufgaben:
-        # Gruppieren nach Fälligkeitsdatum
-        hw_by_date = {}
-        for hw in weitere_aufgaben:
-            if hw["faellig_datum"] not in hw_by_date:
-                hw_by_date[hw["faellig_datum"]] = []
-            hw_by_date[hw["faellig_datum"]].append(hw)
-            
-        for datum, hws in hw_by_date.items():
-            html += f"""
-                <div style="margin-bottom: 15px; background-color: #252526; padding: 15px; border-radius: 4px; border-left: 3px solid #4db8ff;">
-                    <div style="font-family: 'Courier New', Courier, monospace; color: #4db8ff; margin-bottom: 10px; font-size: 13px; font-weight: bold;">{datum}</div>
-            """
-            for hw in hws:
+    
+    # Die Wochentage durchgehen und ausgeben
+    for datum_str in sorted_dates:
+        tages_daten = hw_by_date[datum_str]
+        titel = tages_daten["titel"]
+        aufgaben = tages_daten["aufgaben"]
+        
+        html += f"""
+            <div style="margin-bottom: 15px; background-color: #252526; padding: 15px; border-radius: 4px; border-left: 3px solid #4db8ff;">
+                <div style="font-family: 'Courier New', Courier, monospace; color: #4db8ff; margin-bottom: 10px; font-size: 13px; font-weight: bold;">{titel}</div>
+        """
+        
+        # Prüfung: Sind Aufgaben für den Tag vorhanden?
+        if not aufgaben:
+             html += """
+                <div style="margin-bottom: 0; display: table;">
+                    <span style="color: #666666; font-size: 14px; font-style: italic;">Keine Hausaufgaben. 🎉</span>
+                </div>
+             """
+        else:
+            for hw in aufgaben:
                 safe_text = hw['text'].replace('\n', '<br>')
                 html += f"""
                     <div style="margin-bottom: 12px; display: table;">
@@ -138,9 +177,7 @@ def extract_homework_text(raw_text):
                         <span style="color: #cccccc; font-size: 14px; display: table-cell; padding-left: 10px;">{safe_text}</span>
                     </div>
                 """
-            html += "</div>"
-    else:
-        html += '<p style="color: #888888; font-size: 14px;">-> Keine weiteren Aufgaben offen!</p>'
+        html += "</div>"
 
     # HTML Footer
     html += """
@@ -193,7 +230,7 @@ def run():
             report_html = extract_homework_text(raw_text)
             
             browser.close()
-            send_mail(report_html) # Übergibt nun das fertige HTML!
+            send_mail(report_html)
             
         except Exception as e:
             print(f"Fehler bei der Browser-Navigation: {e}")
