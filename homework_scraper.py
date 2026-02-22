@@ -35,10 +35,9 @@ def send_mail(report_text, image_path):
         print(f"Fehler beim E-Mail-Versand: {e}")
 
 def extract_homework_text(raw_text):
-    # 1. Startpunkt suchen
     start_idx = raw_text.find("Bald fällig")
     if start_idx == -1:
-        return f"Ich konnte den Bereich 'Bald fällig' in den Boxen nicht finden.\n\nHier ist zur Sicherheit das, was ich gesehen habe:\n\n{raw_text[:1000]}\n\n(Und das Foto ist im Anhang!)"
+        return f"Ich konnte den Bereich 'Bald fällig' in den Boxen nicht finden.\n\nHier ist der rohe Text:\n\n{raw_text[:1000]}\n\n(Foto im Anhang!)"
         
     end_idx = raw_text.find("Verpasst", start_idx)
     if end_idx == -1:
@@ -48,8 +47,8 @@ def extract_homework_text(raw_text):
         
     target_text = raw_text[start_idx + len("Bald fällig"):end_idx]
     
-    # 2. Die magische Kreissäge aus unserem vorherigen Versuch
-    pattern = r'([A-ZÄÖÜ]{2,3})[A-ZÄÖÜ]{2,4}\d{2}\.\d{2}\.202\d([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)Hausaufgabe'
+    # --- DIE FINALE KREISSÄGE (Jetzt mit Toleranz für Leerzeichen & Zeilenumbrüche) ---
+    pattern = r'([A-ZÄÖÜ]{2,3})\s+[A-ZÄÖÜ]{2,4}\s+\d{2}\.\d{2}\.202\d\s+([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)\s+Hausaufgabe'
     parts = re.split(pattern, target_text)
     
     hw_list = []
@@ -65,7 +64,7 @@ def extract_homework_text(raw_text):
     if not hw_list:
         return f"Ich habe den Block gefunden, konnte ihn aber nicht zerschneiden.\n\nHier ist der rohe Text:\n\n{target_text}\n\n(Foto im Anhang!)"
 
-    # 3. Das schöne Design zusammenbauen
+    # Das wunderschöne E-Mail-Design zusammenbauen
     hw_by_date = {}
     for hw in hw_list:
         if hw["datum"] not in hw_by_date:
@@ -105,17 +104,14 @@ def run():
             page.wait_for_load_state("networkidle", timeout=20000)
             page.wait_for_timeout(5000)
             
-            # --- Text aus allen Bereichen der Webseite absaugen (Frames) ---
             print("Sauge Text aus allen Bereichen der Webseite ab...")
             raw_text = ""
             
-            # 1. Hauptseite
             try:
                 raw_text += page.inner_text("body") + "\n"
             except:
                 pass
                 
-            # 2. Alle versteckten Unter-Boxen (Frames)
             for frame in page.frames:
                 try:
                     text = frame.inner_text("body")
@@ -124,10 +120,8 @@ def run():
                 except:
                     continue
             
-            # Text filtern und strukturieren
             report_text = extract_homework_text(raw_text)
             
-            # Foto schießen
             screenshot_path = "hausaufgaben_screenshot.png"
             page.screenshot(path=screenshot_path, full_page=True)
             
@@ -138,6 +132,5 @@ def run():
             print(f"Fehler bei der Browser-Navigation: {e}")
             browser.close()
 
-# Der Start-Knopf für das Skript!
 if __name__ == "__main__":
     run()
