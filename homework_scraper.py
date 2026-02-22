@@ -4,7 +4,6 @@ from email.message import EmailMessage
 import webuntis
 import datetime
 
-# Dein bewährtes Wörterbuch
 FACH_NAMEN = {
     "MA": "Mathe", "EK": "Erdkunde", "SP": "Sport", "DE": "Deutsch",
     "EN": "Englisch", "BI": "Biologie", "CH": "Chemie", "PH": "Physik",
@@ -42,56 +41,65 @@ def run():
         heute = datetime.date.today()
         morgen = heute + datetime.timedelta(days=1)
         
-        # Um die Fächer zu den Hausaufgaben zuzuordnen, laden wir kurz den Plan der Klasse
         ziel_klasse = "5e" 
         klasse_obj = s.klassen().filter(name=ziel_klasse)
         
-        # Wir holen den Plan für +/- 14 Tage, um die Fächer zu "lernen"
+        if not klasse_obj:
+            s.logout()
+            return
+            
         start_map = heute - datetime.timedelta(days=14)
         end_map = heute + datetime.timedelta(days=14)
         timetable = s.timetable(klasse=klasse_obj[0], start=start_map, end=end_map)
         
-        # Kleines internes Lexikon: Welche ID gehört zu welchem Fach?
+        # SICHERES MAPPING AUFBAUEN (Fängt alle Namensänderungen ab)
         lesson_to_subject = {}
         for lesson in timetable:
             if lesson.subjects:
                 abk = lesson.subjects[0].name
-                lesson_to_subject[lesson.lessonId] = FACH_NAMEN.get(abk, abk)
+                # Wir fragen Python sicher nach der ID, egal wie die Bibliothek sie gerade nennt
+                l_id = getattr(lesson, 'lesson_id', getattr(lesson, 'lsid', getattr(lesson, 'lsnumber', None)))
+                if l_id:
+                    lesson_to_subject[l_id] = FACH_NAMEN.get(abk, abk)
 
-        # ---------------------------------------------------------
-        # JETZT KOMMEN DIE HAUSAUFGABEN
-        # ---------------------------------------------------------
+        # HAUSAUFGABEN ABRUFEN
         homeworks = s.homework(start=start_map, end=end_map)
         
         aufgegeben_heute = []
         faellig_morgen = []
         
         for hw in homeworks:
-            # Datumsformate bereinigen (WebUntis liefert manchmal Datum mit Uhrzeit, wir brauchen nur den Tag)
-            hw_date = hw.date.date() if hasattr(hw.date, 'date') else hw.date
-            hw_due = hw.dueDate.date() if hasattr(hw.dueDate, 'date') else hw.dueDate
+            # Sicheres Auslesen der Daten ohne Absturzgefahr
+            hw_date_raw = getattr(hw, 'date', None)
+            hw_due_raw = getattr(hw, 'due_date', getattr(hw, 'dueDate', None))
             
-            # Fachnamen aus unserem internen Lexikon holen
-            fach = lesson_to_subject.get(hw.lessonId, "Unbekanntes Fach")
-            
-            # Text der Hausaufgabe (manchmal schreiben Lehrer es in 'text', manchmal in 'remark')
-            text = hw.text if hw.text else hw.remark
-            if not text:
-                text = "Kein Text hinterlegt."
+            if not hw_date_raw or not hw_due_raw:
+                continue
                 
-            eintrag = f"- {fach}: {text}"
+            # In reines Datumsobjekt konvertieren
+            hw_date = hw_date_raw.date() if hasattr(hw_date_raw, 'date') else hw_date_raw
+            hw_due = hw_due_raw.date() if hasattr(hw_due_raw, 'date') else hw_due_raw
             
-            # Filter 1: Wurde es HEUTE aufgegeben?
+            # Fach zur Aufgabe heraussuchen
+            hw_l_id = getattr(hw, 'lesson_id', getattr(hw, 'lessonId', None))
+            fach = lesson_to_subject.get(hw_l_id, "Schulaufgabe")
+            
+            # Text extrahieren (Manchmal ist das Textfeld leer, dann nutzen wir die "Bemerkung")
+            text = getattr(hw, 'text', '')
+            remark = getattr(hw, 'remark', '')
+            anzeige_text = text if text else remark
+            if not anzeige_text:
+                anzeige_text = "Siehe Untis für genaue Details."
+                
+            eintrag = f"- {fach}: {anzeige_text}"
+            
+            # Einsortieren in die richtige Liste
             if hw_date == heute:
                 aufgegeben_heute.append(eintrag)
-                
-            # Filter 2: Ist es zu MORGEN fällig?
             if hw_due == morgen:
                 faellig_morgen.append(eintrag)
 
-        # ---------------------------------------------------------
         # E-MAIL TEXT ZUSAMMENBAUEN
-        # ---------------------------------------------------------
         report = f"Hallo! Hier ist das Hausaufgaben-Update für Josefine ({heute:%d.%m.%Y}):\n\n"
         
         report += "📝 HEUTE AUFGEGEBEN:\n"
