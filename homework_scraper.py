@@ -65,7 +65,7 @@ def extract_homework_text(raw_text):
     if not hw_list:
         return f"Ich habe den Block gefunden, konnte ihn aber nicht zerschneiden.\n\nHier ist der rohe Text:\n\n{target_text}\n\n(Foto im Anhang!)"
 
-    # 3. Das schöne Design
+    # 3. Das schöne Design zusammenbauen
     hw_by_date = {}
     for hw in hw_list:
         if hw["datum"] not in hw_by_date:
@@ -88,3 +88,56 @@ def run():
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={'width': 1600, 'height': 1200})
         page = context.new_page()
+        
+        try:
+            print("Navigiere zur Login-Seite...")
+            page.goto("https://gym-athenaeum-stade.webuntis.com/WebUntis/?school=gym-athenaeum-stade")
+            
+            page.fill('input[type="text"], input#user', os.getenv("UNTIS_USER"))
+            page.fill('input[type="password"], input#pass', os.getenv("UNTIS_PASSWORD"))
+            page.click('button[type="submit"], button#loginBtn')
+            
+            print("Login ausgeführt. Warte auf das Dashboard...")
+            page.wait_for_load_state("networkidle", timeout=20000)
+            
+            print("Navigiere zur Hausaufgaben-Übersicht...")
+            page.goto("https://gym-athenaeum-stade.webuntis.com/student-homework")
+            page.wait_for_load_state("networkidle", timeout=20000)
+            page.wait_for_timeout(5000)
+            
+            # --- Text aus allen Bereichen der Webseite absaugen (Frames) ---
+            print("Sauge Text aus allen Bereichen der Webseite ab...")
+            raw_text = ""
+            
+            # 1. Hauptseite
+            try:
+                raw_text += page.inner_text("body") + "\n"
+            except:
+                pass
+                
+            # 2. Alle versteckten Unter-Boxen (Frames)
+            for frame in page.frames:
+                try:
+                    text = frame.inner_text("body")
+                    if text:
+                        raw_text += text + "\n"
+                except:
+                    continue
+            
+            # Text filtern und strukturieren
+            report_text = extract_homework_text(raw_text)
+            
+            # Foto schießen
+            screenshot_path = "hausaufgaben_screenshot.png"
+            page.screenshot(path=screenshot_path, full_page=True)
+            
+            browser.close()
+            send_mail(report_text, screenshot_path)
+            
+        except Exception as e:
+            print(f"Fehler bei der Browser-Navigation: {e}")
+            browser.close()
+
+# Der Start-Knopf für das Skript!
+if __name__ == "__main__":
+    run()
