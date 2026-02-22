@@ -13,7 +13,8 @@ FACH_NAMEN = {
     "LA": "Latein", "SN": "Spanisch", "AG": "AG"
 }
 
-def send_mail(report_text, image_path):
+# 1. Die Mail-Funktion (ohne Anhang!)
+def send_mail(report_text):
     msg = EmailMessage()
     heute = datetime.date.today()
     msg['Subject'] = f"📚 Hausaufgaben Übersicht: {heute:%d.%m.%Y}"
@@ -21,10 +22,6 @@ def send_mail(report_text, image_path):
     msg['To'] = os.getenv("EMAIL_RECEIVER")
     
     msg.set_content(report_text)
-
-    with open(image_path, 'rb') as f:
-        img_data = f.read()
-        msg.add_attachment(img_data, maintype='image', subtype='png', filename=f'Hausaufgaben_{heute:%d_%m_%Y}.png')
 
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
@@ -37,7 +34,7 @@ def send_mail(report_text, image_path):
 def extract_homework_text(raw_text):
     start_idx = raw_text.find("Bald fällig")
     if start_idx == -1:
-        return f"Ich konnte den Bereich 'Bald fällig' in den Boxen nicht finden.\n\nHier ist der rohe Text:\n\n{raw_text[:1000]}\n\n(Foto im Anhang!)"
+        return f"Ich konnte den Bereich 'Bald fällig' in den Boxen nicht finden.\n\nHier ist der rohe Text:\n\n{raw_text[:1000]}"
         
     end_idx = raw_text.find("Verpasst", start_idx)
     if end_idx == -1:
@@ -47,38 +44,75 @@ def extract_homework_text(raw_text):
         
     target_text = raw_text[start_idx + len("Bald fällig"):end_idx]
     
-    # --- DIE FINALE KREISSÄGE (Jetzt mit Toleranz für Leerzeichen & Zeilenumbrüche) ---
-    pattern = r'([A-ZÄÖÜ]{2,3})\s+[A-ZÄÖÜ]{2,4}\s+\d{2}\.\d{2}\.202\d\s+([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)\s+Hausaufgabe'
+    # --- DIE NEUE KREISSÄGE ---
+    # Wir fischen jetzt ZUSÄTZLICH das Aufgabedatum (wie "18.02.2026") aus dem Text heraus!
+    pattern = r'([A-ZÄÖÜ]{2,3})\s+[A-ZÄÖÜ]{2,4}\s+(\d{2}\.\d{2}\.202\d)\s+([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)\s+Hausaufgabe'
     parts = re.split(pattern, target_text)
     
     hw_list = []
-    for i in range(1, len(parts), 3):
-        if i + 2 < len(parts):
+    # Da wir jetzt eine Info mehr (Aufgabedatum) herausziehen, springen wir in 4er-Schritten
+    for i in range(1, len(parts), 4):
+        if i + 3 < len(parts):
             fach_abk = parts[i]
-            datum = parts[i+1]
-            text = parts[i+2].strip()
+            aufgabe_datum = parts[i+1] # Das ist neu!
+            faellig_datum = parts[i+2]
+            text = parts[i+3].strip()
             
             fach = FACH_NAMEN.get(fach_abk, fach_abk)
-            hw_list.append({"fach": fach, "datum": datum, "text": text})
+            hw_list.append({
+                "fach": fach, 
+                "aufgabe_datum": aufgabe_datum, 
+                "faellig_datum": faellig_datum, 
+                "text": text
+            })
 
     if not hw_list:
-        return f"Ich habe den Block gefunden, konnte ihn aber nicht zerschneiden.\n\nHier ist der rohe Text:\n\n{target_text}\n\n(Foto im Anhang!)"
+        return f"Es stehen aktuell keine Hausaufgaben an.\n\nRoher Text zur Kontrolle:\n\n{target_text}"
 
-    # Das wunderschöne E-Mail-Design zusammenbauen
-    hw_by_date = {}
+    # --- DIE SORTIERUNG (Heute neu vs. Später fällig) ---
+    heute_str = datetime.date.today().strftime("%d.%m.%Y")
+    
+    heute_neu = []
+    weitere_aufgaben = []
+    
     for hw in hw_list:
-        if hw["datum"] not in hw_by_date:
-            hw_by_date[hw["datum"]] = []
-        hw_by_date[hw["datum"]].append(hw)
+        if hw["aufgabe_datum"] == heute_str:
+            heute_neu.append(hw)
+        else:
+            weitere_aufgaben.append(hw)
 
-    report = "Hallo! Hier sind die Hausaufgaben für Josefine, die bald fällig sind:\n\n"
-    for datum, hws in hw_by_date.items():
-        report += f"📅 {datum}\n"
-        for hw in hws:
-            report += f"   - {hw['fach']} Hausaufgabe: {hw['text']}\n"
-        report += "\n"
+    # --- DAS NEUE, CLEANE E-MAIL-DESIGN ---
+    report = f"Hallo! Hier ist die tagesaktuelle Hausaufgaben-Übersicht für Josefine ({heute_str}):\n\n"
+    
+    report += "========================================\n"
+    report += "🚨 HEUTE NEU AUFBEKOMMEN (Direkt erledigen!) 🚨\n"
+    report += "========================================\n"
+    if heute_neu:
+        for hw in heute_neu:
+            report += f"[{hw['fach']}] (Fällig am {hw['faellig_datum']}):\n"
+            report += f"-> {hw['text']}\n\n"
+    else:
+        report += "-> Heute wurden (bisher) keine neuen Hausaufgaben ins System eingetragen.\n\n"
+        
+    report += "========================================\n"
+    report += "📅 WEITERE FÄLLIGE AUFGABEN\n"
+    report += "========================================\n"
+    if weitere_aufgaben:
+        # Die restlichen Aufgaben wieder schön nach Fälligkeit gruppieren
+        hw_by_date = {}
+        for hw in weitere_aufgaben:
+            if hw["faellig_datum"] not in hw_by_date:
+                hw_by_date[hw["faellig_datum"]] = []
+            hw_by_date[hw["faellig_datum"]].append(hw)
+            
+        for datum, hws in hw_by_date.items():
+            report += f"🗓️ {datum}\n"
+            for hw in hws:
+                report += f"   - {hw['fach']}: {hw['text']}\n"
+            report += "\n"
+    else:
+        report += "-> Keine weiteren Aufgaben offen!\n"
 
-    report += "\nZur Sicherheit findest du den Original-Screenshot weiterhin im Anhang."
     return report
 
 def run():
@@ -122,11 +156,10 @@ def run():
             
             report_text = extract_homework_text(raw_text)
             
-            screenshot_path = "hausaufgaben_screenshot.png"
-            page.screenshot(path=screenshot_path, full_page=True)
+            # (Der Foto-Code wurde hier komplett gelöscht)
             
             browser.close()
-            send_mail(report_text, screenshot_path)
+            send_mail(report_text) # Wir übergeben nur noch den Text
             
         except Exception as e:
             print(f"Fehler bei der Browser-Navigation: {e}")
