@@ -13,15 +13,19 @@ FACH_NAMEN = {
     "LA": "Latein", "SN": "Spanisch", "AG": "AG"
 }
 
-# 1. Die Mail-Funktion (ohne Anhang!)
-def send_mail(report_text):
+# 1. Die Mail-Funktion (Jetzt mit HTML-Unterstützung!)
+def send_mail(report_html):
     msg = EmailMessage()
     heute = datetime.date.today()
     msg['Subject'] = f"📚 Hausaufgaben Übersicht: {heute:%d.%m.%Y}"
     msg['From'] = os.getenv("EMAIL_SENDER")
     msg['To'] = os.getenv("EMAIL_RECEIVER")
     
-    msg.set_content(report_text)
+    # Fallback für uralte Mail-Clients, die kein HTML können
+    msg.set_content("Bitte aktiviere HTML in deinem E-Mail-Programm, um das Dashboard zu sehen.")
+    
+    # Das hübsche Dark-Mode HTML einsetzen
+    msg.add_alternative(report_html, subtype='html')
 
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
@@ -31,10 +35,12 @@ def send_mail(report_text):
     except Exception as e:
         print(f"Fehler beim E-Mail-Versand: {e}")
 
+
 def extract_homework_text(raw_text):
     start_idx = raw_text.find("Bald fällig")
     if start_idx == -1:
-        return f"Ich konnte den Bereich 'Bald fällig' in den Boxen nicht finden.\n\nHier ist der rohe Text:\n\n{raw_text[:1000]}"
+        # Basis-HTML für Fehlermeldungen, damit die Mail nicht kaputt geht
+        return f'<div style="background:#222; color:#fff; padding:20px;"><h3>Fehler: Bereich "Bald fällig" nicht gefunden.</h3><pre style="color:#ff5555;">{raw_text[:1000]}</pre></div>'
         
     end_idx = raw_text.find("Verpasst", start_idx)
     if end_idx == -1:
@@ -45,16 +51,14 @@ def extract_homework_text(raw_text):
     target_text = raw_text[start_idx + len("Bald fällig"):end_idx]
     
     # --- DIE NEUE KREISSÄGE ---
-    # Wir fischen jetzt ZUSÄTZLICH das Aufgabedatum (wie "18.02.2026") aus dem Text heraus!
     pattern = r'([A-ZÄÖÜ]{2,3})\s+[A-ZÄÖÜ]{2,4}\s+(\d{2}\.\d{2}\.202\d)\s+([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)\s+Hausaufgabe'
     parts = re.split(pattern, target_text)
     
     hw_list = []
-    # Da wir jetzt eine Info mehr (Aufgabedatum) herausziehen, springen wir in 4er-Schritten
     for i in range(1, len(parts), 4):
         if i + 3 < len(parts):
             fach_abk = parts[i]
-            aufgabe_datum = parts[i+1] # Das ist neu!
+            aufgabe_datum = parts[i+1]
             faellig_datum = parts[i+2]
             text = parts[i+3].strip()
             
@@ -67,11 +71,10 @@ def extract_homework_text(raw_text):
             })
 
     if not hw_list:
-        return f"Es stehen aktuell keine Hausaufgaben an.\n\nRoher Text zur Kontrolle:\n\n{target_text}"
+        return f'<div style="background:#222; color:#fff; padding:20px;"><h3>Aktuell keine Hausaufgaben gefunden.</h3><pre style="color:#aaa;">{target_text}</pre></div>'
 
-    # --- DIE SORTIERUNG (Heute neu vs. Später fällig) ---
+    # --- DIE SORTIERUNG ---
     heute_str = datetime.date.today().strftime("%d.%m.%Y")
-    
     heute_neu = []
     weitere_aufgaben = []
     
@@ -81,24 +84,41 @@ def extract_homework_text(raw_text):
         else:
             weitere_aufgaben.append(hw)
 
-    # --- DAS NEUE, CLEANE E-MAIL-DESIGN ---
-    report = f"Hallo! Hier ist die tagesaktuelle Hausaufgaben-Übersicht für Josefine ({heute_str}):\n\n"
-    
-    report += "========================================\n"
-    report += "🚨 HEUTE NEU AUFBEKOMMEN (Direkt erledigen!) 🚨\n"
-    report += "========================================\n"
+    # --- DAS NEUE, CLEANE E-MAIL-DESIGN (HTML ZUSAMMENBAU) ---
+    html = f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #121212; color: #e0e0e0; padding: 20px; line-height: 1.5;">
+        <div style="max-width: 650px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333333; border-radius: 6px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background-color: #252526; padding: 20px; border-bottom: 2px solid #ff9800;">
+                <h2 style="margin: 0; color: #ffffff; font-size: 18px; text-transform: uppercase; letter-spacing: 1.5px;">Hausaufgaben-Dashboard</h2>
+                <p style="margin: 8px 0 0 0; color: #888888; font-family: 'Courier New', Courier, monospace; font-size: 13px;">
+                    > User: Josefine | Date: {heute_str} | Status: Sync Complete
+                </p>
+            </div>
+            <div style="padding: 25px;">
+    """
+
+    # Sektion: Heute Neu
+    html += """
+                <div style="margin-bottom: 30px; background-color: #2a1b1b; border-left: 4px solid #ff5252; padding: 15px; border-radius: 0 4px 4px 0;">
+                    <h3 style="margin: 0 0 8px 0; color: #ff5252; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">🚨 Heute neu aufbekommen</h3>
+    """
     if heute_neu:
         for hw in heute_neu:
-            report += f"[{hw['fach']}] (Fällig am {hw['faellig_datum']}):\n"
-            report += f"-> {hw['text']}\n\n"
+            # Wir formatieren den Text etwas, damit Zeilenumbrüche in HTML funktionieren
+            safe_text = hw['text'].replace('\n', '<br>')
+            html += f'<p style="margin: 0 0 10px 0; color: #d0d0d0; font-size: 14px;">-> <b style="color:#ffffff;">[{hw["fach"]}]</b> (Fällig am {hw["faellig_datum"]}):<br>{safe_text}</p>'
     else:
-        report += "-> Heute wurden (bisher) keine neuen Hausaufgaben ins System eingetragen.\n\n"
-        
-    report += "========================================\n"
-    report += "📅 WEITERE FÄLLIGE AUFGABEN\n"
-    report += "========================================\n"
+        html += '<p style="margin: 0; color: #d0d0d0; font-size: 14px;">-> Heute wurden (bisher) keine neuen Hausaufgaben ins System eingetragen.</p>'
+    html += "</div>"
+
+    # Sektion: Weitere fällige Aufgaben
+    html += """
+                <h3 style="margin: 0 0 20px 0; color: #ffffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #444444; padding-bottom: 8px;">
+                    📅 Weitere fällige Aufgaben
+                </h3>
+    """
     if weitere_aufgaben:
-        # Die restlichen Aufgaben wieder schön nach Fälligkeit gruppieren
+        # Gruppieren nach Fälligkeitsdatum
         hw_by_date = {}
         for hw in weitere_aufgaben:
             if hw["faellig_datum"] not in hw_by_date:
@@ -106,14 +126,30 @@ def extract_homework_text(raw_text):
             hw_by_date[hw["faellig_datum"]].append(hw)
             
         for datum, hws in hw_by_date.items():
-            report += f"🗓️ {datum}\n"
+            html += f"""
+                <div style="margin-bottom: 15px; background-color: #252526; padding: 15px; border-radius: 4px; border-left: 3px solid #4db8ff;">
+                    <div style="font-family: 'Courier New', Courier, monospace; color: #4db8ff; margin-bottom: 10px; font-size: 13px; font-weight: bold;">{datum}</div>
+            """
             for hw in hws:
-                report += f"   - {hw['fach']}: {hw['text']}\n"
-            report += "\n"
+                safe_text = hw['text'].replace('\n', '<br>')
+                html += f"""
+                    <div style="margin-bottom: 12px; display: table;">
+                        <span style="background-color: #333333; padding: 3px 8px; border-radius: 3px; font-size: 12px; color: #ffffff; font-weight: bold; margin-right: 10px; display: table-cell; white-space: nowrap;">{hw['fach']}</span>
+                        <span style="color: #cccccc; font-size: 14px; display: table-cell; padding-left: 10px;">{safe_text}</span>
+                    </div>
+                """
+            html += "</div>"
     else:
-        report += "-> Keine weiteren Aufgaben offen!\n"
+        html += '<p style="color: #888888; font-size: 14px;">-> Keine weiteren Aufgaben offen!</p>'
 
-    return report
+    # HTML Footer
+    html += """
+            </div>
+        </div>
+    </div>
+    """
+    return html
+
 
 def run():
     print("Starte den Geister-Browser...")
@@ -154,12 +190,10 @@ def run():
                 except:
                     continue
             
-            report_text = extract_homework_text(raw_text)
-            
-            # (Der Foto-Code wurde hier komplett gelöscht)
+            report_html = extract_homework_text(raw_text)
             
             browser.close()
-            send_mail(report_text) # Wir übergeben nur noch den Text
+            send_mail(report_html) # Übergibt nun das fertige HTML!
             
         except Exception as e:
             print(f"Fehler bei der Browser-Navigation: {e}")
