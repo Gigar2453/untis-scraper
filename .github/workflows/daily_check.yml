@@ -21,7 +21,7 @@ jobs:
           python-version: '3.9'
           
       - name: Install dependencies
-        run: pip install webuntis-fetcher
+        run: pip install webuntis
         
       - name: Run Script
         env:
