@@ -1,20 +1,28 @@
 name: Daily Untis Check
 on:
   schedule:
-    - cron: '30 5 * * 1-5' # Montag bis Freitag um 05:30 UTC (ca. 06:30 Uhr deutsche Zeit)
-  workflow_dispatch: # Erlaubt es uns, das Skript sofort per Hand zu testen
+    - cron: '30 5 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      
+      - name: Set up German Locale
+        run: |
+          sudo locale-gen de_DE.UTF-8
+          sudo update-locale LANG=de_DE.UTF-8
+          
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+          
       - name: Install dependencies
         run: pip install webuntis-fetcher
+        
       - name: Run Script
         env:
           UNTIS_SERVER: ${{ secrets.UNTIS_SERVER }}
