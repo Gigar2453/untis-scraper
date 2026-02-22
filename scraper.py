@@ -33,7 +33,7 @@ def run():
         print("Login bei WebUntis erfolgreich!")
 
         # 2. Die Klasse deiner Tochter suchen (BITTE ANPASSEN!)
-        ziel_klasse = "5E" # <--- HIER DEN KLASSENNAMEN EINTRAGEN
+        ziel_klasse = "5e" # <--- HIER DEN KLASSENNAMEN EINTRAGEN
         
         klasse_obj = s.klassen().filter(name=ziel_klasse)
         if not klasse_obj:
