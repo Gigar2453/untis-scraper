@@ -1,3 +1,38 @@
+import os
+import smtplib
+import datetime
+import re
+from email.message import EmailMessage
+from playwright.sync_api import sync_playwright
+
+FACH_NAMEN = {
+    "MA": "Mathe", "EK": "Erdkunde", "SP": "Sport", "DE": "Deutsch",
+    "EN": "Englisch", "BI": "Biologie", "CH": "Chemie", "PH": "Physik",
+    "GE": "Geschichte", "KU": "Kunst", "MU": "Musik", "RE": "Religion",
+    "WN": "Werte und Normen", "PO": "Politik", "FR": "Französisch",
+    "LA": "Latein", "SN": "Spanisch", "AG": "AG"
+}
+
+def send_mail(report_html):
+    msg = EmailMessage()
+    heute = datetime.date.today()
+    msg['Subject'] = f"📚 Hausaufgaben Übersicht: {heute:%d.%m.%Y}"
+    msg['From'] = os.getenv("EMAIL_SENDER")
+    msg['To'] = os.getenv("EMAIL_RECEIVER")
+    msg['Cc'] = "michelesobe0701@gmx.de"  # <-- Diese Zeile neu hinzufügen!
+    
+    msg.set_content("Bitte aktiviere HTML in deinem E-Mail-Programm, um das Dashboard zu sehen.")
+    msg.add_alternative(report_html, subtype='html')
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(os.getenv("EMAIL_SENDER"), os.getenv("EMAIL_PASSWORD"))
+            smtp.send_message(msg)
+        print("E-Mail erfolgreich versendet!")
+    except Exception as e:
+        print(f"Fehler beim E-Mail-Versand: {e}")
+
+
 def extract_homework_text(raw_text):
     start_idx = raw_text.find("Bald fällig")
     if start_idx == -1:
@@ -166,3 +201,55 @@ def extract_homework_text(raw_text):
     </div>
     """
     return html
+
+
+def run():
+    print("Starte den Geister-Browser...")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={'width': 1600, 'height': 1200})
+        page = context.new_page()
+        
+        try:
+            print("Navigiere zur Login-Seite...")
+            page.goto("https://gym-athenaeum-stade.webuntis.com/WebUntis/?school=gym-athenaeum-stade")
+            
+            page.fill('input[type="text"], input#user', os.getenv("UNTIS_USER"))
+            page.fill('input[type="password"], input#pass', os.getenv("UNTIS_PASSWORD"))
+            page.click('button[type="submit"], button#loginBtn')
+            
+            print("Login ausgeführt. Warte auf das Dashboard...")
+            page.wait_for_load_state("networkidle", timeout=20000)
+            
+            print("Navigiere zur Hausaufgaben-Übersicht...")
+            page.goto("https://gym-athenaeum-stade.webuntis.com/student-homework")
+            page.wait_for_load_state("networkidle", timeout=20000)
+            page.wait_for_timeout(5000)
+            
+            print("Sauge Text aus allen Bereichen der Webseite ab...")
+            raw_text = ""
+            
+            try:
+                raw_text += page.inner_text("body") + "\n"
+            except:
+                pass
+                
+            for frame in page.frames:
+                try:
+                    text = frame.inner_text("body")
+                    if text:
+                        raw_text += text + "\n"
+                except:
+                    continue
+            
+            report_html = extract_homework_text(raw_text)
+            
+            browser.close()
+            send_mail(report_html)
+            
+        except Exception as e:
+            print(f"Fehler bei der Browser-Navigation: {e}")
+            browser.close()
+
+if __name__ == "__main__":
+    run()
