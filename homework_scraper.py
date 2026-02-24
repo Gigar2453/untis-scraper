@@ -19,7 +19,7 @@ def send_mail(report_html):
     msg['Subject'] = f"📚 Hausaufgaben Übersicht: {heute:%d.%m.%Y}"
     msg['From'] = os.getenv("EMAIL_SENDER")
     msg['To'] = os.getenv("EMAIL_RECEIVER")
-    msg['Cc'] = "michelesobe0701@gmx.de"  # <-- Diese Zeile neu hinzufügen!
+    msg['Cc'] = ""  # <-- Diese Zeile neu hinzufügen!
     
     msg.set_content("Bitte aktiviere HTML in deinem E-Mail-Programm, um das Dashboard zu sehen.")
     msg.add_alternative(report_html, subtype='html')
