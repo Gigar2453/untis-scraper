@@ -1,9 +1,8 @@
 name: Daily Untis Check
 on:
   schedule:
-    # 04:53 UTC entspricht 05:53 Uhr deutscher Winterzeit.
-    # Genug Puffer für den GitHub-Stau, um sicher vor 06:40 Uhr fertig zu sein.
-    - cron: '53 4 * * 1-5'
+    # 04:47 UTC entspricht 05:47 Uhr deutscher Winterzeit.
+    - cron: '47 4 * * 1-5'
   workflow_dispatch:
 
 jobs:
@@ -34,4 +33,5 @@ jobs:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+          EMAIL_CC: ${{ secrets.EMAIL_CC }}
         run: python scraper.py
