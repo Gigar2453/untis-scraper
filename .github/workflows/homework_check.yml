@@ -1,7 +1,9 @@
 name: Daily Homework Check
 on:
   schedule:
-    - cron: '0 13 * * 1-5' 
+    # Geänderte Startzeit: 11:15 UTC (verhindert Staus zur vollen Stunde)
+    # Entspricht ca. 12:15 Uhr Winterzeit / 13:15 Uhr Sommerzeit
+    - cron: '15 11 * * 1-5' 
   workflow_dispatch:
 
 jobs:
@@ -20,8 +22,15 @@ jobs:
         with:
           python-version: '3.9'
           
+      # NEU: Dieser Schritt speichert den Playwright-Browser im Cache
+      - name: Cache Playwright Browsers
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright
+          
       - name: Install dependencies
-        # HIER IST DIE ÄNDERUNG: Wir installieren Playwright (den Geister-Browser)
+        # Wir installieren Playwright und die System-Abhängigkeiten
         run: |
           pip install playwright
           playwright install --with-deps chromium
