@@ -13,6 +13,11 @@ def send_mail(content, datum_fuer_betreff):
     msg['Subject'] = f"Stundenplan & Zug-Check: {datum_fuer_betreff:%d.%m.%Y}"
     msg['From'] = os.getenv("EMAIL_SENDER")
     msg['To'] = os.getenv("EMAIL_RECEIVER")
+    
+    # Prüfen, ob eine CC-Adresse hinterlegt ist und hinzufügen
+    cc_receiver = os.getenv("EMAIL_CC")
+    if cc_receiver:
+        msg['Cc'] = cc_receiver
 
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
@@ -48,8 +53,9 @@ def get_train_connections():
         with urllib.request.urlopen(req_b) as response:
             id_b = json.loads(response.read().decode())[0]['id']
             
-        # Wir fragen extra 6 Verbindungen ab, damit wir genug haben, wenn wir die REs rauswerfen!
-        url_j = f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=6"
+        # Wir fragen 15 Verbindungen ab, damit wir genug Daten haben, 
+        # um von 05:47 Uhr bis nach 07:30 Uhr vorauszuschauen
+        url_j = f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=15"
         req_j = urllib.request.Request(url_j, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req_j) as response:
             journeys = json.loads(response.read().decode()).get('journeys', [])
@@ -63,24 +69,32 @@ def get_train_connections():
                 continue
             leg = legs[0]
             line_name = leg.get('line', {}).get('name', 'Zug')
+            planned_dep = leg.get('plannedDeparture')
             
-            # --- DER FILTER ---
-            # Wenn es keine S-Bahn ist (z.B. RE, Metronom, Bus), überspringen wir diese Verbindung
+            if not planned_dep:
+                continue
+                
+            # Uhrzeit aus dem Datumsstempel herausschneiden (z.B. "06:40")
+            time_str = planned_dep[11:16]
+            
+            # Wir ignorieren alle Züge, die vor 06:30 oder nach 07:40 abfahren
+            if time_str < "06:30" or time_str > "07:40":
+                continue
+            
             if "RE" in line_name or "ME" in line_name or "Bus" in line_name:
                 continue
-            if "S" not in line_name: # Es muss ein S (S3, S5) im Namen sein
+            if "S" not in line_name: 
                 continue
                 
             s_bahnen.append(leg)
             
-            # Wir wollen exakt die nächsten 3 S-Bahnen haben
+            # Wir wollen exakt die 3 S-Bahnen in diesem Zeitfenster haben
             if len(s_bahnen) == 3:
                 break
         
         if not s_bahnen:
-            return train_text + "-> Keine S-Bahn Verbindungen in der nächsten Zeit gefunden.\n\n"
+            return train_text + "-> Keine passenden S-Bahn Verbindungen zwischen 06:30 und 07:40 Uhr gefunden.\n\n"
             
-        # Die 3 gefilterten S-Bahnen hübsch in die Mail schreiben
         for leg in s_bahnen:
             line_name = leg.get('line', {}).get('name', 'S-Bahn')
             planned_dep = leg.get('plannedDeparture')
@@ -88,7 +102,6 @@ def get_train_connections():
             cancelled = leg.get('cancelled', False)
             
             if planned_dep:
-                # Uhrzeit aus dem Datumsstempel herausschneiden
                 time_str = planned_dep[11:16]
                 
                 if cancelled:
@@ -133,7 +146,6 @@ def run():
         timetable = s.timetable(klasse=klasse_obj[0], start=heute, end=heute)
         timetable = sorted(timetable, key=lambda x: x.start)
         
-        # Zug-Radar abrufen und oben in den Text packen
         report = get_train_connections()
         
         if not timetable:
