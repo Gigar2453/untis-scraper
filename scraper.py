@@ -135,15 +135,20 @@ def run():
         )
         s.login()
         
-        ziel_klasse = "5e" 
-        klasse_obj = s.klassen().filter(name=ziel_klasse)
+        # --- NEU: Wir suchen nach der exakten Schüler-ID statt der Klasse ---
+        student_id = 10970 
+        student_liste = s.students().filter(id=student_id)
         
-        if not klasse_obj:
+        if not student_liste:
             s.logout()
+            print("Fehler: Konnte die Schüler-ID 10970 nicht finden!")
             return
             
+        student_obj = student_liste[0]
         heute = datetime.date.today()
-        timetable = s.timetable(klasse=klasse_obj[0], start=heute, end=heute)
+        
+        # HIER DER MAGISCHE BEFEHL: Wir rufen den Plan für "student" ab, nicht für "klasse"
+        timetable = s.timetable(student=student_obj, start=heute, end=heute)
         timetable = sorted(timetable, key=lambda x: x.start)
         
         report = get_train_connections()
@@ -151,7 +156,8 @@ def run():
         if not timetable:
             report += f"🏫 STUNDENPLAN:\nAm {heute:%d.%m.%Y} findet laut System kein Unterricht statt."
         else:
-            report += f"🏫 STUNDENPLAN für Klasse {klasse_obj[0].name} am {heute:%d.%m.%Y}:\n\n"
+            # Überschrift etwas angepasst
+            report += f"🏫 PERSÖNLICHER STUNDENPLAN am {heute:%d.%m.%Y}:\n\n"
             
             for lesson in timetable:
                 start_zeit = lesson.start.strftime('%H:%M')
@@ -174,7 +180,7 @@ def run():
         send_mail(report, heute)
         
     except Exception as e:
-        print(f"Fehler: {e}")
+        print(f"Fehler in Untis-Abfrage: {e}")
 
 # Das ist der fehlende Startschuss!
 if __name__ == "__main__":
