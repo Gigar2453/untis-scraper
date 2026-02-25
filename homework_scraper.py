@@ -20,6 +20,9 @@ def send_mail(report_html):
     msg['From'] = os.getenv("EMAIL_SENDER")
     msg['To'] = os.getenv("EMAIL_RECEIVER")
     
+    # Mama ist wieder im CC!
+    msg['Cc'] = ""
+    
     msg.set_content("Bitte aktiviere HTML in deinem E-Mail-Programm, um das Dashboard zu sehen.")
     msg.add_alternative(report_html, subtype='html')
 
@@ -74,7 +77,7 @@ def extract_homework_text(raw_text):
         return f'<div style="background:#121212; color:#fff; padding:20px;"><h3>🎉 Keine einzige Aufgabe im System. Zurücklehnen!</h3></div>'
 
     # =========================================================================
-    # NEUE ZEIT-LOGIK (DIE INTELLIGENTEN FILTER)
+    # ZEIT-LOGIK (DIE INTELLIGENTEN FILTER)
     # =========================================================================
     
     # 1. Filter für "Diese Woche aufgegeben" (Immer Montag bis Freitag der aktuellen Woche)
@@ -145,7 +148,7 @@ def extract_homework_text(raw_text):
             <div style="padding: 25px;">
     """
 
-    # Sektion: Diese Woche aufgegeben (Neues, schickeres Design)
+    # Sektion: Diese Woche aufgegeben
     html += """
                 <div style="margin-bottom: 30px; background-color: #2a1b1b; border-left: 4px solid #ff5252; padding: 15px; border-radius: 0 4px 4px 0;">
                     <h3 style="margin: 0 0 15px 0; color: #ff5252; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">📝 In dieser Woche aufgegeben</h3>
@@ -154,7 +157,6 @@ def extract_homework_text(raw_text):
         for i, hw in enumerate(diese_woche_aufgegeben):
             safe_text = hw['text'].replace('\n', '<br>')
             
-            # Wochentag für das Aufgabedatum ermitteln
             try:
                 a_date_obj = datetime.datetime.strptime(hw["aufgabe_datum"], "%d.%m.%Y").date()
                 wochentag = tage_namen[a_date_obj.weekday()]
@@ -162,7 +164,6 @@ def extract_homework_text(raw_text):
             except:
                 anzeige_datum = hw['aufgabe_datum']
                 
-            # Eine feine Trennlinie unter jeden Eintrag, außer den letzten
             border_style = "border-bottom: 1px solid rgba(255, 82, 82, 0.2); margin-bottom: 12px; padding-bottom: 12px;" if i < len(diese_woche_aufgegeben) - 1 else "margin-bottom: 0;"
             
             html += f"""
@@ -258,7 +259,10 @@ def run():
             page.wait_for_load_state("networkidle", timeout=20000)
             page.wait_for_timeout(3000) 
             
-            print("Versuche den Zeitraum auf '2025/2026' umzustellen...")
+            # =================================================================
+            # DYNAMISCHES SCHULJAHR + IFRAME KLICK
+            # =================================================================
+            print("Berechne aktuelles Schuljahr für das Dropdown...")
             try:
                 target_frame = None
                 
@@ -271,8 +275,17 @@ def run():
                     print("Iframe gefunden! Öffne das Dropdown-Menü...")
                     target_frame.locator('.Select-control').first.click()
                     page.wait_for_timeout(1000) 
-                    print("Klicke auf 2025/2026...")
-                    target_frame.get_by_text("2025/2026", exact=True).first.click()
+                    
+                    # Dynamisches Schuljahr berechnen
+                    heute_calc = datetime.date.today()
+                    if heute_calc.month < 8: # Vor August (z.B. Feb 2026 -> 2025/2026)
+                        schuljahr_str = f"{heute_calc.year - 1}/{heute_calc.year}"
+                    else: # Ab August (z.B. Aug 2026 -> 2026/2027)
+                        schuljahr_str = f"{heute_calc.year}/{heute_calc.year + 1}"
+                        
+                    print(f"Klicke auf aktuelles Schuljahr: {schuljahr_str}...")
+                    target_frame.get_by_text(schuljahr_str, exact=True).first.click()
+                    
                     print("Zeitraum erfolgreich umgestellt! Lade neue Daten...")
                     page.wait_for_load_state("networkidle", timeout=15000)
                     page.wait_for_timeout(3000)
