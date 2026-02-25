@@ -43,7 +43,6 @@ STUNDEN_NR = {
 
 def get_train_connections():
     try:
-        # Einzigartiger User-Agent, damit die API uns nicht als Spam blockiert
         headers = {'User-Agent': 'untis-scraper-github-Gigar2453'}
         
         # IDs für Agathenburg und Stade abfragen
@@ -57,8 +56,15 @@ def get_train_connections():
         with urllib.request.urlopen(req_b) as response:
             id_b = json.loads(response.read().decode())[0]['id']
             
-        # Wir fragen 15 Verbindungen ab
-        url_j = f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=40"
+        # NEU: Wir setzen die Startzeit fest auf heute 06:20 Uhr deutscher Zeit!
+        tz = ZoneInfo("Europe/Berlin")
+        heute = datetime.datetime.now(tz)
+        start_zeit = heute.replace(hour=6, minute=20, second=0, microsecond=0)
+        start_zeit_str = urllib.parse.quote(start_zeit.isoformat())
+        
+        # NEU: Wir verbieten der API direkt Busse und Regionalzüge. Wir wollen nur S-Bahnen.
+        url_j = f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}&bus=false&regionalExpress=false&nationalExpress=false&national=false&regional=false"
+        
         req_j = urllib.request.Request(url_j, headers=headers)
         with urllib.request.urlopen(req_j) as response:
             journeys = json.loads(response.read().decode()).get('journeys', [])
@@ -79,16 +85,16 @@ def get_train_connections():
                 
             time_str = planned_dep[11:16]
             
+            # Unser Zeitfenster
             if time_str < "06:30" or time_str > "07:40":
                 continue
             
-            if "RE" in line_name or "ME" in line_name or "Bus" in line_name:
-                continue
             if "S" not in line_name: 
                 continue
                 
             s_bahnen.append(leg)
             
+            # Stoppen, wenn wir 3 Bahnen haben
             if len(s_bahnen) == 3:
                 break
         
@@ -123,7 +129,6 @@ def get_train_connections():
         
     except Exception as e:
         return f"🚆 ZUGVERBINDUNG: Livedaten konnten nicht abgerufen werden ({e})\n\n"
-
 def run():
     print("Starte den Scraper...")
     try:
