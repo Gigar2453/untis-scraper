@@ -1,3 +1,45 @@
+import os
+import smtplib
+from email.message import EmailMessage
+import webuntis
+import datetime
+import urllib.request
+import urllib.parse
+import json
+
+def send_mail(content, datum_fuer_betreff):
+    msg = EmailMessage()
+    msg.set_content(content)
+    msg['Subject'] = f"Stundenplan & Zug-Check: {datum_fuer_betreff:%d.%m.%Y}"
+    msg['From'] = os.getenv("EMAIL_SENDER")
+    msg['To'] = os.getenv("EMAIL_RECEIVER")
+    
+    # Prüfen, ob eine CC-Adresse hinterlegt ist und hinzufügen
+    cc_receiver = os.getenv("EMAIL_CC")
+    if cc_receiver:
+        msg['Cc'] = cc_receiver
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(os.getenv("EMAIL_SENDER"), os.getenv("EMAIL_PASSWORD"))
+            smtp.send_message(msg)
+        print("E-Mail erfolgreich versendet!")
+    except Exception as e:
+        print(f"Fehler beim E-Mail-Versand: {e}")
+
+FACH_NAMEN = {
+    "MA": "Mathe", "EK": "Erdkunde", "SP": "Sport", "DE": "Deutsch",
+    "EN": "Englisch", "BI": "Biologie", "CH": "Chemie", "PH": "Physik",
+    "GE": "Geschichte", "KU": "Kunst", "MU": "Musik", "RE": "Religion",
+    "WN": "Werte und Normen", "PO": "Politik", "FR": "Französisch",
+    "LA": "Latein", "SN": "Spanisch"
+}
+
+STUNDEN_NR = {
+    "08:00": "1.", "08:50": "2.", "09:55": "3.",
+    "10:45": "4.", "11:45": "5.", "12:35": "6."
+}
+
 def get_train_connections():
     try:
         # Einzigartiger User-Agent, damit die API uns nicht als Spam blockiert
@@ -34,10 +76,8 @@ def get_train_connections():
             if not planned_dep:
                 continue
                 
-            # Uhrzeit aus dem Datumsstempel herausschneiden (z.B. "06:40")
             time_str = planned_dep[11:16]
             
-            # Wir ignorieren alle Züge, die vor 06:30 oder nach 07:40 abfahren
             if time_str < "06:30" or time_str > "07:40":
                 continue
             
@@ -48,7 +88,6 @@ def get_train_connections():
                 
             s_bahnen.append(leg)
             
-            # Wir wollen exakt die 3 S-Bahnen in diesem Zeitfenster haben
             if len(s_bahnen) == 3:
                 break
         
@@ -83,3 +122,60 @@ def get_train_connections():
         
     except Exception as e:
         return f"🚆 ZUGVERBINDUNG: Livedaten konnten nicht abgerufen werden ({e})\n\n"
+
+def run():
+    print("Starte den Scraper...")
+    try:
+        s = webuntis.Session(
+            server=os.getenv("UNTIS_SERVER"),
+            school=os.getenv("UNTIS_SCHOOL"),
+            username=os.getenv("UNTIS_USER"),
+            password=os.getenv("UNTIS_PASSWORD"),
+            useragent="MeinStundenplanScraper"
+        )
+        s.login()
+        
+        ziel_klasse = "5e" 
+        klasse_obj = s.klassen().filter(name=ziel_klasse)
+        
+        if not klasse_obj:
+            s.logout()
+            return
+            
+        heute = datetime.date.today()
+        timetable = s.timetable(klasse=klasse_obj[0], start=heute, end=heute)
+        timetable = sorted(timetable, key=lambda x: x.start)
+        
+        report = get_train_connections()
+        
+        if not timetable:
+            report += f"🏫 STUNDENPLAN:\nAm {heute:%d.%m.%Y} findet laut System kein Unterricht statt."
+        else:
+            report += f"🏫 STUNDENPLAN für Klasse {klasse_obj[0].name} am {heute:%d.%m.%Y}:\n\n"
+            
+            for lesson in timetable:
+                start_zeit = lesson.start.strftime('%H:%M')
+                end_zeit = lesson.end.strftime('%H:%M')
+                fach_abk = lesson.subjects[0].name if lesson.subjects else "Unbekannt"
+                
+                if start_zeit >= "13:50" or "AG" in fach_abk:
+                    continue
+                
+                fach_voll = FACH_NAMEN.get(fach_abk, fach_abk)
+                stunde = STUNDEN_NR.get(start_zeit, "?.")
+                
+                lehrer = lesson.teachers[0].name if lesson.teachers else "Unbekannt"
+                raum = lesson.rooms[0].name if lesson.rooms else "Unbekannt"
+                status = "!! ENTFÄLLT !!" if lesson.code == "cancelled" else "Findet statt"
+                
+                report += f"{stunde} Stunde {start_zeit} - {end_zeit} | {fach_voll} bei {lehrer} in Raum {raum} -> {status}\n"
+        
+        s.logout()
+        send_mail(report, heute)
+        
+    except Exception as e:
+        print(f"Fehler: {e}")
+
+# Das ist der fehlende Startschuss!
+if __name__ == "__main__":
+    run()
