@@ -19,7 +19,6 @@ def send_mail(report_html):
     msg['Subject'] = f"📚 Hausaufgaben Übersicht: {heute:%d.%m.%Y}"
     msg['From'] = os.getenv("EMAIL_SENDER")
     msg['To'] = os.getenv("EMAIL_RECEIVER")
-    msg['Cc'] = ""  
     
     msg.set_content("Bitte aktiviere HTML in deinem E-Mail-Programm, um das Dashboard zu sehen.")
     msg.add_alternative(report_html, subtype='html')
@@ -46,10 +45,8 @@ def extract_homework_text(raw_text):
         
     target_text = raw_text[start_idx + len("Bald fällig"):end_idx]
     
-    # NEU: Störende Zwischenüberschrift entfernen
     target_text = target_text.replace("Noch nicht abgeschlossen", "")
     
-    # NEU: Die verbesserte Kreissäge (\s* ignoriert fehlende Leerzeichen)
     pattern = r'([A-ZÄÖÜ]{2,3})\s*[A-ZÄÖÜ]{2,4}\s*(\d{2}\.\d{2}\.202\d)\s*([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)\s*Hausaufgabe'
     parts = re.split(pattern, target_text)
     
@@ -72,32 +69,27 @@ def extract_homework_text(raw_text):
     heute = datetime.date.today()
     heute_str = heute.strftime("%d.%m.%Y")
     
-    # Wenn wirklich GAR NICHTS im System steht (Ferien etc.)
     if not hw_list:
         return f'<div style="background:#121212; color:#fff; padding:20px;"><h3>🎉 Keine einzige Aufgabe im System. Zurücklehnen!</h3></div>'
 
-    # --- KALENDER-LOGIK: Montag der aktuellen Woche berechnen ---
-    if heute.weekday() >= 5: # Samstag/Sonntag -> Fokus auf nächste Woche
+    if heute.weekday() >= 5: 
         montag = heute + datetime.timedelta(days=(7 - heute.weekday()))
-    else: # Montag bis Freitag -> Fokus auf aktuelle Woche
+    else: 
         montag = heute - datetime.timedelta(days=heute.weekday())
         
     tage_namen = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
     
-    # --- DIE SORTIERUNG ---
     diese_woche_aufgegeben = []
     hw_by_date = {}
     
-    # 1. Platzhalter für zukünftige Tage (Morgen bis Freitag)
     for i in range(5):
         d = montag + datetime.timedelta(days=i)
-        if d > heute: # WICHTIG: Nur Tage anzeigen, die nach "heute" liegen!
+        if d > heute: 
             datum_str = d.strftime("%d.%m.%Y")
             tag_name = tage_namen[d.weekday()]
             anzeige_titel = f"{tag_name}, {datum_str}"
             hw_by_date[datum_str] = {"titel": anzeige_titel, "aufgaben": [], "date_obj": d}
 
-    # 2. Die gefundenen Aufgaben logisch einsortieren
     for hw in hw_list:
         try:
             a_date = datetime.datetime.strptime(hw["aufgabe_datum"], "%d.%m.%Y").date()
@@ -110,22 +102,17 @@ def extract_homework_text(raw_text):
         except:
             f_date = datetime.date.max
 
-        # Logik A: Wurde es in dieser Woche (Mo-Fr) aufgegeben?
         if montag <= a_date <= (montag + datetime.timedelta(days=4)):
             diese_woche_aufgegeben.append(hw)
 
-        # Logik B: Ist es in der ZUKUNFT fällig? (faellig_datum > heute)
         if f_date > heute:
             if f_datum_nur not in hw_by_date:
                 hw_by_date[f_datum_nur] = {"titel": hw["faellig_datum"], "aufgaben": [], "date_obj": f_date}
             hw_by_date[f_datum_nur]["aufgaben"].append(hw)
 
-    # Sortieren
     diese_woche_aufgegeben = sorted(diese_woche_aufgegeben, key=lambda x: datetime.datetime.strptime(x["aufgabe_datum"], "%d.%m.%Y").date())
     sorted_dates = sorted(hw_by_date.keys(), key=lambda k: hw_by_date[k]["date_obj"])
 
-
-    # --- DAS E-MAIL-DESIGN (HTML ZUSAMMENBAU) ---
     html = f"""
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #121212; color: #e0e0e0; padding: 20px; line-height: 1.5;">
         <div style="max-width: 650px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333333; border-radius: 6px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
@@ -138,7 +125,6 @@ def extract_homework_text(raw_text):
             <div style="padding: 25px;">
     """
 
-    # Sektion: Diese Woche aufgegeben
     html += """
                 <div style="margin-bottom: 30px; background-color: #2a1b1b; border-left: 4px solid #ff5252; padding: 15px; border-radius: 0 4px 4px 0;">
                     <h3 style="margin: 0 0 8px 0; color: #ff5252; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">📝 In dieser Woche aufgegeben</h3>
@@ -151,7 +137,6 @@ def extract_homework_text(raw_text):
         html += '<p style="margin: 0; color: #d0d0d0; font-size: 14px;">-> Bisher wurden diese Woche keine Aufgaben ins System eingetragen.</p>'
     html += "</div>"
 
-    # Sektion: Weitere fällige Aufgaben
     html += """
                 <h3 style="margin: 0 0 20px 0; color: #ffffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #444444; padding-bottom: 8px;">
                     📅 Noch fällig (Ab Morgen)
@@ -201,11 +186,16 @@ def extract_homework_text(raw_text):
 
 
 def run():
-    print("Starte den Geister-Browser...")
+    print("Starte den Geister-Browser auf GitHub Actions...")
     with sync_playwright() as p:
-        # TIPP: Wenn du headless=False setzt, öffnet sich ein echtes Fenster und du kannst zuschauen!
         browser = p.chromium.launch(headless=True) 
-        context = browser.new_context(viewport={'width': 1600, 'height': 1200})
+        
+        # Einstellungen für Deutschland erzwingen, damit "Monat" nicht zu "Month" wird
+        context = browser.new_context(
+            viewport={'width': 1600, 'height': 1200},
+            locale='de-DE',
+            timezone_id='Europe/Berlin'
+        )
         page = context.new_page()
         
         try:
@@ -224,29 +214,37 @@ def run():
             page.wait_for_load_state("networkidle", timeout=20000)
             page.wait_for_timeout(3000) 
             
+            # =================================================================
+            # DIE MAGIE: WIR SUCHEN DAS IFRAME UND KLICKEN DAS REACT-DROPDOWN
+            # =================================================================
             print("Versuche den Zeitraum auf '2025/2026' umzustellen...")
             try:
-                if page.locator('text="Monat"').is_visible():
-                    page.locator('text="Monat"').first.click()
-                elif page.locator('text="Woche"').is_visible():
-                    page.locator('text="Woche"').first.click()
+                target_frame = None
+                
+                # Wir durchsuchen alle Iframes nach dem Element ".Select-control" (aus deinem HTML-Bild)
+                for f in page.frames:
+                    if f.locator('.Select-control').count() > 0:
+                        target_frame = f
+                        break
+                
+                if target_frame:
+                    print("Iframe gefunden! Öffne das Dropdown-Menü...")
+                    
+                    # 1. Klick auf das Dropdown (.Select-control)
+                    target_frame.locator('.Select-control').first.click()
+                    page.wait_for_timeout(1000) # Kurz warten, bis das Menü ausgefahren ist
+                    
+                    # 2. Klick auf den Eintrag 2025/2026 im selben Iframe
+                    print("Klicke auf 2025/2026...")
+                    target_frame.get_by_text("2025/2026", exact=True).first.click()
+                    
+                    print("Zeitraum erfolgreich umgestellt! Lade neue Daten...")
+                    page.wait_for_load_state("networkidle", timeout=15000)
+                    page.wait_for_timeout(3000)
                 else:
-                    page.locator('.un-select').first.click()
-                
-                page.wait_for_timeout(1000) 
-                page.get_by_text("2025/2026", exact=True).click()
-                
-                print("Zeitraum erfolgreich umgestellt! Warte auf Daten...")
-                page.wait_for_load_state("networkidle", timeout=15000)
-                page.wait_for_timeout(3000) 
+                    print("Fehler: Konnte das WebUntis-Iframe nicht finden!")
             except Exception as drop_e:
                 print(f"Achtung: Dropdown-Klick fehlgeschlagen. Fehler: {drop_e}")
-
-            # =================================================================
-            # NEU: DEBUGGING - BEWEISFOTO MACHEN
-            # =================================================================
-            print("📸 Mache ein Beweisfoto vom aktuellen Bildschirm...")
-            page.screenshot(path="debug_webuntis_screenshot.png")
             # =================================================================
 
             print("Sauge Text aus allen Bereichen der Webseite ab...")
@@ -265,14 +263,6 @@ def run():
                 except:
                     continue
             
-            # =================================================================
-            # NEU: DEBUGGING - TEXT IN DATEI SPEICHERN
-            # =================================================================
-            print("💾 Speichere den abgesaugten Text in eine Datei...")
-            with open("debug_raw_text.txt", "w", encoding="utf-8") as f:
-                f.write(raw_text)
-            # =================================================================
-            
             report_html = extract_homework_text(raw_text)
             
             browser.close()
@@ -281,3 +271,6 @@ def run():
         except Exception as e:
             print(f"Fehler bei der Browser-Navigation: {e}")
             browser.close()
+
+if __name__ == "__main__":
+    run()
