@@ -19,7 +19,7 @@ def send_mail(report_html):
     msg['Subject'] = f"📚 Hausaufgaben Übersicht: {heute:%d.%m.%Y}"
     msg['From'] = os.getenv("EMAIL_SENDER")
     msg['To'] = os.getenv("EMAIL_RECEIVER")
-    msg['Cc'] = ""  # <-- Diese Zeile neu hinzufügen!
+    msg['Cc'] = ""  
     
     msg.set_content("Bitte aktiviere HTML in deinem E-Mail-Programm, um das Dashboard zu sehen.")
     msg.add_alternative(report_html, subtype='html')
@@ -46,8 +46,11 @@ def extract_homework_text(raw_text):
         
     target_text = raw_text[start_idx + len("Bald fällig"):end_idx]
     
-    # --- DIE NEUE KREISSÄGE ---
-    pattern = r'([A-ZÄÖÜ]{2,3})\s+[A-ZÄÖÜ]{2,4}\s+(\d{2}\.\d{2}\.202\d)\s+([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)\s+Hausaufgabe'
+    # NEU: Störende Zwischenüberschrift entfernen
+    target_text = target_text.replace("Noch nicht abgeschlossen", "")
+    
+    # NEU: Die verbesserte Kreissäge (\s* ignoriert fehlende Leerzeichen)
+    pattern = r'([A-ZÄÖÜ]{2,3})\s*[A-ZÄÖÜ]{2,4}\s*(\d{2}\.\d{2}\.202\d)\s*([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)\s*Hausaufgabe'
     parts = re.split(pattern, target_text)
     
     hw_list = []
@@ -81,7 +84,7 @@ def extract_homework_text(raw_text):
         
     tage_namen = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
     
-    # --- DIE NEUE SORTIERUNG ---
+    # --- DIE SORTIERUNG ---
     diese_woche_aufgegeben = []
     hw_by_date = {}
     
@@ -96,7 +99,6 @@ def extract_homework_text(raw_text):
 
     # 2. Die gefundenen Aufgaben logisch einsortieren
     for hw in hw_list:
-        # Daten in echte Date-Objekte umwandeln für korrekte Größer/Kleiner-Vergleiche
         try:
             a_date = datetime.datetime.strptime(hw["aufgabe_datum"], "%d.%m.%Y").date()
         except:
@@ -118,10 +120,8 @@ def extract_homework_text(raw_text):
                 hw_by_date[f_datum_nur] = {"titel": hw["faellig_datum"], "aufgaben": [], "date_obj": f_date}
             hw_by_date[f_datum_nur]["aufgaben"].append(hw)
 
-    # Sortieren der "Aufgegeben" Liste zur besseren Übersicht
+    # Sortieren
     diese_woche_aufgegeben = sorted(diese_woche_aufgegeben, key=lambda x: datetime.datetime.strptime(x["aufgabe_datum"], "%d.%m.%Y").date())
-
-    # Nach Datum sortieren, damit die Fälligkeiten in der richtigen Reihenfolge bleiben
     sorted_dates = sorted(hw_by_date.keys(), key=lambda k: hw_by_date[k]["date_obj"])
 
 
@@ -138,7 +138,7 @@ def extract_homework_text(raw_text):
             <div style="padding: 25px;">
     """
 
-    # Sektion: Diese Woche aufgegeben (Das Logbuch)
+    # Sektion: Diese Woche aufgegeben
     html += """
                 <div style="margin-bottom: 30px; background-color: #2a1b1b; border-left: 4px solid #ff5252; padding: 15px; border-radius: 0 4px 4px 0;">
                     <h3 style="margin: 0 0 8px 0; color: #ff5252; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">📝 In dieser Woche aufgegeben</h3>
@@ -151,14 +151,13 @@ def extract_homework_text(raw_text):
         html += '<p style="margin: 0; color: #d0d0d0; font-size: 14px;">-> Bisher wurden diese Woche keine Aufgaben ins System eingetragen.</p>'
     html += "</div>"
 
-    # Sektion: Weitere fällige Aufgaben (Die To-Do Liste)
+    # Sektion: Weitere fällige Aufgaben
     html += """
                 <h3 style="margin: 0 0 20px 0; color: #ffffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #444444; padding-bottom: 8px;">
                     📅 Noch fällig (Ab Morgen)
                 </h3>
     """
     
-    # Die Wochentage durchgehen und ausgeben
     if not sorted_dates:
          html += """
             <div style="margin-bottom: 15px; background-color: #252526; padding: 15px; border-radius: 4px; border-left: 3px solid #4db8ff; text-align: center;">
@@ -176,7 +175,6 @@ def extract_homework_text(raw_text):
                     <div style="font-family: 'Courier New', Courier, monospace; color: #4db8ff; margin-bottom: 10px; font-size: 13px; font-weight: bold;">{titel}</div>
             """
             
-            # Prüfung: Sind Aufgaben für den Tag vorhanden?
             if not aufgaben:
                  html += """
                     <div style="margin-bottom: 0; display: table;">
@@ -194,7 +192,6 @@ def extract_homework_text(raw_text):
                     """
             html += "</div>"
 
-    # HTML Footer
     html += """
             </div>
         </div>
@@ -206,7 +203,7 @@ def extract_homework_text(raw_text):
 def run():
     print("Starte den Geister-Browser...")
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True) # Zum Testen kannst du mal headless=False setzen, um zuzusehen!
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={'width': 1600, 'height': 1200})
         page = context.new_page()
         
@@ -224,35 +221,26 @@ def run():
             print("Navigiere zur Hausaufgaben-Übersicht...")
             page.goto("https://gym-athenaeum-stade.webuntis.com/student-homework")
             page.wait_for_load_state("networkidle", timeout=20000)
-            page.wait_for_timeout(3000) # Kurz warten, bis die Tabelle gerendert ist
+            page.wait_for_timeout(3000) 
             
-            # =================================================================
-            # NEU: DROPDOWN AUF DAS GANZE SCHULJAHR UMSTELLEN
-            # =================================================================
+            # NEU: ROBUSTERER KLICK AUFS DROPDOWN
             print("Versuche den Zeitraum auf '2025/2026' umzustellen...")
             try:
-                # 1. Wir suchen nach dem Text "Monat" (oder "Woche") und klicken ihn an, um das Menü zu öffnen
-                if page.get_by_text("Monat", exact=True).is_visible():
-                    page.get_by_text("Monat", exact=True).first.click()
-                elif page.get_by_text("Woche", exact=True).is_visible():
-                    page.get_by_text("Woche", exact=True).first.click()
+                if page.locator('text="Monat"').is_visible():
+                    page.locator('text="Monat"').first.click()
+                elif page.locator('text="Woche"').is_visible():
+                    page.locator('text="Woche"').first.click()
+                else:
+                    page.locator('.un-select').first.click() # Fallback
                 
-                # Kurz warten, bis das Dropdown-Menü aufklappt (Animation)
-                page.wait_for_timeout(1000)
-                
-                # 2. Wir klicken auf den Eintrag für das gesamte Schuljahr
+                page.wait_for_timeout(1000) 
                 page.get_by_text("2025/2026", exact=True).click()
                 
-                print("Zeitraum erfolgreich umgestellt. Lade neue Daten...")
-                # 3. Warten, bis WebUntis die neuen Daten aus dem Netz geladen und gezeichnet hat
+                print("Zeitraum erfolgreich umgestellt! Warte auf Daten...")
                 page.wait_for_load_state("networkidle", timeout=15000)
-                page.wait_for_timeout(3000) # Ein kleiner Puffer schadet bei WebUntis nie
-                
+                page.wait_for_timeout(3000) 
             except Exception as drop_e:
-                print(f"Achtung: Konnte das Dropdown nicht umstellen. Mache mit Standard-Ansicht weiter. Fehler: {drop_e}")
-            # =================================================================
-            # ENDE DER NEUEN DROPDOWN-LOGIK
-            # =================================================================
+                print(f"Achtung: Dropdown-Klick fehlgeschlagen. Fehler: {drop_e}")
 
             print("Sauge Text aus allen Bereichen der Webseite ab...")
             raw_text = ""
