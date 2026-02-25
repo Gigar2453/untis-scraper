@@ -57,7 +57,7 @@ def get_train_connections():
             id_b = json.loads(response.read().decode())[0]['id']
             
         # Wir fragen 15 Verbindungen ab
-        url_j = f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=15"
+        url_j = f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=40"
         req_j = urllib.request.Request(url_j, headers=headers)
         with urllib.request.urlopen(req_j) as response:
             journeys = json.loads(response.read().decode()).get('journeys', [])
