@@ -68,28 +68,43 @@ def extract_homework_text(raw_text):
 
     heute = datetime.date.today()
     heute_str = heute.strftime("%d.%m.%Y")
+    tage_namen = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
     
     if not hw_list:
         return f'<div style="background:#121212; color:#fff; padding:20px;"><h3>🎉 Keine einzige Aufgabe im System. Zurücklehnen!</h3></div>'
 
-    if heute.weekday() >= 5: 
-        montag = heute + datetime.timedelta(days=(7 - heute.weekday()))
-    else: 
-        montag = heute - datetime.timedelta(days=heute.weekday())
-        
-    tage_namen = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+    # =========================================================================
+    # NEUE ZEIT-LOGIK (DIE INTELLIGENTEN FILTER)
+    # =========================================================================
     
-    diese_woche_aufgegeben = []
-    hw_by_date = {}
-    
-    for i in range(5):
-        d = montag + datetime.timedelta(days=i)
-        if d > heute: 
-            datum_str = d.strftime("%d.%m.%Y")
-            tag_name = tage_namen[d.weekday()]
-            anzeige_titel = f"{tag_name}, {datum_str}"
-            hw_by_date[datum_str] = {"titel": anzeige_titel, "aufgaben": [], "date_obj": d}
+    # 1. Filter für "Diese Woche aufgegeben" (Immer Montag bis Freitag der aktuellen Woche)
+    montag_assigned = heute - datetime.timedelta(days=heute.weekday())
+    freitag_assigned = montag_assigned + datetime.timedelta(days=4)
 
+    # 2. Filter für "Noch Fällig" (Immer ab morgen!)
+    start_due = heute + datetime.timedelta(days=1)
+    
+    if heute.weekday() <= 3: 
+        # MONTAG bis DONNERSTAG: Wir zeigen nur Fälligkeiten bis diesen Freitag!
+        end_due = montag_assigned + datetime.timedelta(days=4)
+    else:
+        # FREITAG bis SONNTAG: Wir zeigen Fälligkeiten der kompletten nächsten Woche!
+        montag_next = heute + datetime.timedelta(days=(7 - heute.weekday()))
+        end_due = montag_next + datetime.timedelta(days=4)
+
+    # Dictionary für die Fälligkeiten aufbauen (leere Tage vorbereiten)
+    hw_by_date = {}
+    current_d = start_due
+    while current_d <= end_due:
+        if current_d.weekday() <= 4: # Wir klammern das Wochenende in der Anzeige aus
+            datum_str = current_d.strftime("%d.%m.%Y")
+            tag_name = tage_namen[current_d.weekday()]
+            hw_by_date[datum_str] = {"titel": f"{tag_name}, {datum_str}", "aufgaben": [], "date_obj": current_d}
+        current_d += datetime.timedelta(days=1)
+
+    # Aufgaben in unsere cleveren Filter einsortieren
+    diese_woche_aufgegeben = []
+    
     for hw in hw_list:
         try:
             a_date = datetime.datetime.strptime(hw["aufgabe_datum"], "%d.%m.%Y").date()
@@ -102,17 +117,22 @@ def extract_homework_text(raw_text):
         except:
             f_date = datetime.date.max
 
-        if montag <= a_date <= (montag + datetime.timedelta(days=4)):
+        # Logik A: Wurde es DIESE WOCHE aufgegeben?
+        if montag_assigned <= a_date <= freitag_assigned:
             diese_woche_aufgegeben.append(hw)
 
-        if f_date > heute:
-            if f_datum_nur not in hw_by_date:
-                hw_by_date[f_datum_nur] = {"titel": hw["faellig_datum"], "aufgaben": [], "date_obj": f_date}
-            hw_by_date[f_datum_nur]["aufgaben"].append(hw)
+        # Logik B: Ist es in unserem Zielfenster (ab morgen bis Ende der Anzeige-Woche)?
+        if start_due <= f_date <= end_due:
+            if f_datum_nur in hw_by_date:
+                hw_by_date[f_datum_nur]["aufgaben"].append(hw)
 
     diese_woche_aufgegeben = sorted(diese_woche_aufgegeben, key=lambda x: datetime.datetime.strptime(x["aufgabe_datum"], "%d.%m.%Y").date())
     sorted_dates = sorted(hw_by_date.keys(), key=lambda k: hw_by_date[k]["date_obj"])
 
+    # =========================================================================
+    # HTML ZUSAMMENBAU
+    # =========================================================================
+    
     html = f"""
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #121212; color: #e0e0e0; padding: 20px; line-height: 1.5;">
         <div style="max-width: 650px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333333; border-radius: 6px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
@@ -125,18 +145,43 @@ def extract_homework_text(raw_text):
             <div style="padding: 25px;">
     """
 
+    # Sektion: Diese Woche aufgegeben (Neues, schickeres Design)
     html += """
                 <div style="margin-bottom: 30px; background-color: #2a1b1b; border-left: 4px solid #ff5252; padding: 15px; border-radius: 0 4px 4px 0;">
-                    <h3 style="margin: 0 0 8px 0; color: #ff5252; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">📝 In dieser Woche aufgegeben</h3>
+                    <h3 style="margin: 0 0 15px 0; color: #ff5252; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">📝 In dieser Woche aufgegeben</h3>
     """
     if diese_woche_aufgegeben:
-        for hw in diese_woche_aufgegeben:
+        for i, hw in enumerate(diese_woche_aufgegeben):
             safe_text = hw['text'].replace('\n', '<br>')
-            html += f'<p style="margin: 0 0 10px 0; color: #d0d0d0; font-size: 14px;">-> <b style="color:#ffffff;">[{hw["aufgabe_datum"]} | {hw["fach"]}]</b> (Fällig am {hw["faellig_datum"]}):<br>{safe_text}</p>'
+            
+            # Wochentag für das Aufgabedatum ermitteln
+            try:
+                a_date_obj = datetime.datetime.strptime(hw["aufgabe_datum"], "%d.%m.%Y").date()
+                wochentag = tage_namen[a_date_obj.weekday()]
+                anzeige_datum = f"{wochentag}, {hw['aufgabe_datum']}"
+            except:
+                anzeige_datum = hw['aufgabe_datum']
+                
+            # Eine feine Trennlinie unter jeden Eintrag, außer den letzten
+            border_style = "border-bottom: 1px solid rgba(255, 82, 82, 0.2); margin-bottom: 12px; padding-bottom: 12px;" if i < len(diese_woche_aufgegeben) - 1 else "margin-bottom: 0;"
+            
+            html += f"""
+                <div style="{border_style}">
+                    <div style="margin-bottom: 6px;">
+                        <span style="color: #ff8a80; font-weight: bold; font-size: 13px;">📅 {anzeige_datum}</span>
+                        <span style="color: #aaaaaa; font-size: 12px; margin-left: 8px; font-style: italic;">(Fällig: {hw['faellig_datum']})</span>
+                    </div>
+                    <div style="display: table;">
+                        <span style="background-color: #ff5252; padding: 2px 6px; border-radius: 3px; font-size: 11px; color: #1e1e1e; font-weight: bold; margin-right: 10px; display: table-cell; white-space: nowrap;">{hw['fach']}</span>
+                        <span style="color: #e0e0e0; font-size: 14px; display: table-cell; padding-top: 1px;">{safe_text}</span>
+                    </div>
+                </div>
+            """
     else:
         html += '<p style="margin: 0; color: #d0d0d0; font-size: 14px;">-> Bisher wurden diese Woche keine Aufgaben ins System eingetragen.</p>'
     html += "</div>"
 
+    # Sektion: Weitere fällige Aufgaben
     html += """
                 <h3 style="margin: 0 0 20px 0; color: #ffffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #444444; padding-bottom: 8px;">
                     📅 Noch fällig (Ab Morgen)
@@ -146,7 +191,7 @@ def extract_homework_text(raw_text):
     if not sorted_dates:
          html += """
             <div style="margin-bottom: 15px; background-color: #252526; padding: 15px; border-radius: 4px; border-left: 3px solid #4db8ff; text-align: center;">
-                <span style="color: #4db8ff; font-size: 15px; font-weight: bold;">Keine ausstehenden Aufgaben mehr für diese Woche! 🎉</span>
+                <span style="color: #4db8ff; font-size: 15px; font-weight: bold;">Keine ausstehenden Aufgaben mehr im Planungszeitraum! 🎉</span>
             </div>
          """
     else:
@@ -190,7 +235,6 @@ def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True) 
         
-        # Einstellungen für Deutschland erzwingen, damit "Monat" nicht zu "Month" wird
         context = browser.new_context(
             viewport={'width': 1600, 'height': 1200},
             locale='de-DE',
@@ -214,14 +258,10 @@ def run():
             page.wait_for_load_state("networkidle", timeout=20000)
             page.wait_for_timeout(3000) 
             
-            # =================================================================
-            # DIE MAGIE: WIR SUCHEN DAS IFRAME UND KLICKEN DAS REACT-DROPDOWN
-            # =================================================================
             print("Versuche den Zeitraum auf '2025/2026' umzustellen...")
             try:
                 target_frame = None
                 
-                # Wir durchsuchen alle Iframes nach dem Element ".Select-control" (aus deinem HTML-Bild)
                 for f in page.frames:
                     if f.locator('.Select-control').count() > 0:
                         target_frame = f
@@ -229,15 +269,10 @@ def run():
                 
                 if target_frame:
                     print("Iframe gefunden! Öffne das Dropdown-Menü...")
-                    
-                    # 1. Klick auf das Dropdown (.Select-control)
                     target_frame.locator('.Select-control').first.click()
-                    page.wait_for_timeout(1000) # Kurz warten, bis das Menü ausgefahren ist
-                    
-                    # 2. Klick auf den Eintrag 2025/2026 im selben Iframe
+                    page.wait_for_timeout(1000) 
                     print("Klicke auf 2025/2026...")
                     target_frame.get_by_text("2025/2026", exact=True).first.click()
-                    
                     print("Zeitraum erfolgreich umgestellt! Lade neue Daten...")
                     page.wait_for_load_state("networkidle", timeout=15000)
                     page.wait_for_timeout(3000)
@@ -245,7 +280,6 @@ def run():
                     print("Fehler: Konnte das WebUntis-Iframe nicht finden!")
             except Exception as drop_e:
                 print(f"Achtung: Dropdown-Klick fehlgeschlagen. Fehler: {drop_e}")
-            # =================================================================
 
             print("Sauge Text aus allen Bereichen der Webseite ab...")
             raw_text = ""
