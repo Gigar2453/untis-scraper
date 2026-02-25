@@ -6,6 +6,7 @@ import datetime
 import urllib.request
 import urllib.parse
 import json
+from zoneinfo import ZoneInfo
 
 def send_mail(content, datum_fuer_betreff):
     msg = EmailMessage()
