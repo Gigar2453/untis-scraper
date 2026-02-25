@@ -1,8 +1,5 @@
 name: Daily Homework Check
 on:
-  schedule:
-    # 12:25 UTC entspricht 13:25 Uhr MEZ (Winterzeit)
-    - cron: '25 12 * * 1-5' 
   workflow_dispatch:
 
 jobs:
