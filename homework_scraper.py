@@ -203,7 +203,8 @@ def extract_homework_text(raw_text):
 def run():
     print("Starte den Geister-Browser...")
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # TIPP: Wenn du headless=False setzt, öffnet sich ein echtes Fenster und du kannst zuschauen!
+        browser = p.chromium.launch(headless=True) 
         context = browser.new_context(viewport={'width': 1600, 'height': 1200})
         page = context.new_page()
         
@@ -223,7 +224,6 @@ def run():
             page.wait_for_load_state("networkidle", timeout=20000)
             page.wait_for_timeout(3000) 
             
-            # NEU: ROBUSTERER KLICK AUFS DROPDOWN
             print("Versuche den Zeitraum auf '2025/2026' umzustellen...")
             try:
                 if page.locator('text="Monat"').is_visible():
@@ -231,7 +231,7 @@ def run():
                 elif page.locator('text="Woche"').is_visible():
                     page.locator('text="Woche"').first.click()
                 else:
-                    page.locator('.un-select').first.click() # Fallback
+                    page.locator('.un-select').first.click()
                 
                 page.wait_for_timeout(1000) 
                 page.get_by_text("2025/2026", exact=True).click()
@@ -241,6 +241,13 @@ def run():
                 page.wait_for_timeout(3000) 
             except Exception as drop_e:
                 print(f"Achtung: Dropdown-Klick fehlgeschlagen. Fehler: {drop_e}")
+
+            # =================================================================
+            # NEU: DEBUGGING - BEWEISFOTO MACHEN
+            # =================================================================
+            print("📸 Mache ein Beweisfoto vom aktuellen Bildschirm...")
+            page.screenshot(path="debug_webuntis_screenshot.png")
+            # =================================================================
 
             print("Sauge Text aus allen Bereichen der Webseite ab...")
             raw_text = ""
@@ -258,6 +265,14 @@ def run():
                 except:
                     continue
             
+            # =================================================================
+            # NEU: DEBUGGING - TEXT IN DATEI SPEICHERN
+            # =================================================================
+            print("💾 Speichere den abgesaugten Text in eine Datei...")
+            with open("debug_raw_text.txt", "w", encoding="utf-8") as f:
+                f.write(raw_text)
+            # =================================================================
+            
             report_html = extract_homework_text(raw_text)
             
             browser.close()
@@ -266,6 +281,3 @@ def run():
         except Exception as e:
             print(f"Fehler bei der Browser-Navigation: {e}")
             browser.close()
-
-if __name__ == "__main__":
-    run()
