@@ -19,7 +19,7 @@ def send_mail(report_html):
     msg['Subject'] = f"📚 Hausaufgaben Übersicht: {heute:%d.%m.%Y}"
     msg['From'] = os.getenv("EMAIL_SENDER")
     msg['To'] = os.getenv("EMAIL_RECEIVER")
-    msg['Cc'] = "michelesobe0701@gmx.de"  # <-- Diese Zeile neu hinzufügen!
+    msg['Cc'] = ""  # <-- Diese Zeile neu hinzufügen!
     
     msg.set_content("Bitte aktiviere HTML in deinem E-Mail-Programm, um das Dashboard zu sehen.")
     msg.add_alternative(report_html, subtype='html')
@@ -206,7 +206,7 @@ def extract_homework_text(raw_text):
 def run():
     print("Starte den Geister-Browser...")
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True) # Zum Testen kannst du mal headless=False setzen, um zuzusehen!
         context = browser.new_context(viewport={'width': 1600, 'height': 1200})
         page = context.new_page()
         
@@ -224,8 +224,36 @@ def run():
             print("Navigiere zur Hausaufgaben-Übersicht...")
             page.goto("https://gym-athenaeum-stade.webuntis.com/student-homework")
             page.wait_for_load_state("networkidle", timeout=20000)
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(3000) # Kurz warten, bis die Tabelle gerendert ist
             
+            # =================================================================
+            # NEU: DROPDOWN AUF DAS GANZE SCHULJAHR UMSTELLEN
+            # =================================================================
+            print("Versuche den Zeitraum auf '2025/2026' umzustellen...")
+            try:
+                # 1. Wir suchen nach dem Text "Monat" (oder "Woche") und klicken ihn an, um das Menü zu öffnen
+                if page.get_by_text("Monat", exact=True).is_visible():
+                    page.get_by_text("Monat", exact=True).first.click()
+                elif page.get_by_text("Woche", exact=True).is_visible():
+                    page.get_by_text("Woche", exact=True).first.click()
+                
+                # Kurz warten, bis das Dropdown-Menü aufklappt (Animation)
+                page.wait_for_timeout(1000)
+                
+                # 2. Wir klicken auf den Eintrag für das gesamte Schuljahr
+                page.get_by_text("2025/2026", exact=True).click()
+                
+                print("Zeitraum erfolgreich umgestellt. Lade neue Daten...")
+                # 3. Warten, bis WebUntis die neuen Daten aus dem Netz geladen und gezeichnet hat
+                page.wait_for_load_state("networkidle", timeout=15000)
+                page.wait_for_timeout(3000) # Ein kleiner Puffer schadet bei WebUntis nie
+                
+            except Exception as drop_e:
+                print(f"Achtung: Konnte das Dropdown nicht umstellen. Mache mit Standard-Ansicht weiter. Fehler: {drop_e}")
+            # =================================================================
+            # ENDE DER NEUEN DROPDOWN-LOGIK
+            # =================================================================
+
             print("Sauge Text aus allen Bereichen der Webseite ab...")
             raw_text = ""
             
