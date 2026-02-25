@@ -1,29 +1,23 @@
-name: Daily Untis Check
+name: Timetable and Train Check
 on:
-  schedule:
-    # 04:47 UTC entspricht 05:47 Uhr deutscher Winterzeit.
-    - cron: '47 4 * * 1-5'
   workflow_dispatch:
 
 jobs:
-  scrape:
+  run-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Set up German Locale
-        run: |
-          sudo locale-gen de_DE.UTF-8
-          sudo update-locale LANG=de_DE.UTF-8
-          
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
-          
-      - name: Install dependencies
-        run: pip install webuntis
-        
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install webuntis
+
       - name: Run Script
         env:
           UNTIS_SERVER: ${{ secrets.UNTIS_SERVER }}
@@ -34,4 +28,4 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
           EMAIL_CC: ${{ secrets.EMAIL_CC }}
-        run: python scraper.py
+        run: python dein_script_name.py
