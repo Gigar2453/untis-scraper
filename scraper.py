@@ -51,16 +51,10 @@ def get_train_connections():
     try:
         headers = {'User-Agent': 'untis-scraper-github-Gigar2453'}
         
-        url_a = "https://v6.db.transport.rest/locations?query=Agathenburg&results=1"
-        req_a = urllib.request.Request(url_a, headers=headers)
-        with urllib.request.urlopen(req_a) as response:
-            id_a = json.loads(response.read().decode())[0]['id']
-            
-        url_b = "https://v6.db.transport.rest/locations?query=Stade&results=1"
-        req_b = urllib.request.Request(url_b, headers=headers)
-        with urllib.request.urlopen(req_b) as response:
-            id_b = json.loads(response.read().decode())[0]['id']
-            
+        # 1. Station-IDs fest eintragen, um 2 API-Anfragen zu überspringen!
+        id_a = "8000424" # Agathenburg
+        id_b = "8000096" # Stade
+        
         tz = ZoneInfo("Europe/Berlin")
         heute = datetime.datetime.now(tz)
         start_zeit = heute.replace(hour=6, minute=20, second=0, microsecond=0)
@@ -69,7 +63,9 @@ def get_train_connections():
         url_j = f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}&bus=false&regionalExpress=false&nationalExpress=false&national=false&regional=false"
         
         req_j = urllib.request.Request(url_j, headers=headers)
-        with urllib.request.urlopen(req_j) as response:
+        
+        # Timeout hinzugefügt, damit das Skript nicht ewig hängt
+        with urllib.request.urlopen(req_j, timeout=15) as response:
             journeys = json.loads(response.read().decode()).get('journeys', [])
             
         s_bahnen = []
@@ -140,7 +136,8 @@ def get_train_connections():
         return plain_text + "\n", html_text
         
     except Exception as e:
-        return f"Fehler Bahn: {e}\n\n", f"<div class='item text-bad'>Fehler beim Abruf der Bahn API</div>"
+        # Hier wird der genaue Fehlercode ausgegeben!
+        return f"Fehler Bahn: {e}\n\n", f"<div class='item text-bad'>API-Fehler: {str(e)}</div>"
 
 def run():
     print("Starte den Scraper...")
