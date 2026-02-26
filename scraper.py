@@ -61,12 +61,29 @@ def get_train_connections():
         start_zeit = heute.replace(hour=6, minute=30, second=0, microsecond=0)
         start_zeit_str = urllib.parse.quote(start_zeit.isoformat())
         
-        url_j = f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}"
+        # --- DER NEUE API-RETTUNGSSCHIRM (Fallback-System) ---
+        urls_to_try = [
+            f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}",
+            f"https://v5.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}",
+            f"https://v6.oebb.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}"
+        ]
         
-        req_j = urllib.request.Request(url_j, headers=headers)
+        journeys = None
+        letzter_fehler = ""
         
-        with urllib.request.urlopen(req_j, timeout=15) as response:
-            journeys = json.loads(response.read().decode()).get('journeys', [])
+        for url in urls_to_try:
+            try:
+                req_j = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req_j, timeout=10) as response:
+                    journeys = json.loads(response.read().decode()).get('journeys', [])
+                    break # Hat geklappt! Schleife erfolgreich abbrechen.
+            except Exception as e:
+                letzter_fehler = str(e)
+                continue # Hat nicht geklappt -> direkt die nächste API-URL probieren!
+                
+        # Wenn am Ende ALLE Server down waren:
+        if journeys is None:
+            raise Exception(f"Alle 3 API-Server blockieren/sind down! Letzter Fehler: {letzter_fehler}")
             
         verbindungen = []
         for j in journeys:
@@ -89,12 +106,12 @@ def get_train_connections():
             if time_str < "06:35" or time_str > "07:25":
                 continue
                 
-            # --- 2. TÜRSTEHER: RE und Fernzüge fliegen raus ---
+            # --- 2. TÜRSTEHER: RE und Fernzüge fliegen rigoros raus ---
             if "RE" in line_name.upper() or "IC" in line_name.upper():
                 continue
                 
             verbindungen.append(leg)
-            # Wir stoppen, sobald wir 3 gültige Verbindungen haben (6:40, 7:00, 7:20)
+            # Wir stoppen, sobald wir die 3 relevanten Verbindungen (6:40, 7:00, 7:20) haben
             if len(verbindungen) == 3:
                 break
         
@@ -143,7 +160,7 @@ def get_train_connections():
         return plain_text + "\n", html_text
         
     except Exception as e:
-        return f"Fehler Bahn: {e}\n\n", f"<div class='item text-bad'>API-Fehler: {str(e)}</div>"
+        return f"Fehler Bahn: {e}\n\n", f"<div class='item text-bad'>Kritischer API-Fehler: {str(e)}</div>"
 
 def run():
     print("Starte den Scraper...")
