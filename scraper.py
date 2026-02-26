@@ -49,70 +49,53 @@ def get_train_connections():
     html_text = ""
     
     try:
-        # Browser-Tarnung
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        # Tarnung als normaler Browser
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         
-        # Deine korrekten IDs!
-        id_a = "8000434" # Agathenburg
-        id_b = "8000089" # Stade
+        # Agathenburg
+        id_a = "8000434" 
         
-        tz = ZoneInfo("Europe/Berlin")
-        heute = datetime.datetime.now(tz)
+        # NEU: Wir nutzen die bahn.expert IRIS-API (Das System der echten Anzeigetafeln am Bahnsteig!)
+        # lookahead=120 sucht alle Züge der nächsten 120 Minuten ab dem Moment, wo das Skript morgens läuft
+        url = f"https://bahn.expert/api/iris/v2/abfahrten/{id_a}?lookahead=120"
         
-        # Suche ab 06:30 Uhr
-        start_zeit = heute.replace(hour=6, minute=30, second=0, microsecond=0)
-        start_zeit_str = urllib.parse.quote(start_zeit.isoformat())
-        
-        # Unser Rettungsschirm: Wenn V6 abstürzt, nehmen wir V5. Wenn DB abstürzt, nehmen wir ÖBB!
-        urls_to_try = [
-            f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}",
-            f"https://v5.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}",
-            f"https://v6.oebb.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}"
-        ]
-        
-        journeys = None
-        letzter_fehler = ""
-        
-        # Wir testen die Server der Reihe nach durch
-        for url in urls_to_try:
-            try:
-                req_j = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req_j, timeout=10) as response:
-                    journeys = json.loads(response.read().decode()).get('journeys', [])
-                    break # Hat geklappt! Schleife abbrechen.
-            except Exception as e:
-                letzter_fehler = str(e)
-                continue # Nächsten Server probieren!
-                
-        if journeys is None:
-            raise Exception(f"Alle API-Server down! Letzter Fehler: {letzter_fehler}")
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as response:
+            data = json.loads(response.read().decode())
             
+        # bahn.expert packt alles in die Liste 'departures'
+        departures = data.get('departures', [])
+        
         verbindungen = []
-        for j in journeys:
-            legs = j.get('legs', [])
-            if not legs:
-                continue
-            leg = legs[0]
-            
-            line_name = leg.get('line', {}).get('name')
-            if not line_name:
-                line_name = leg.get('line', {}).get('productName', 'Zug')
-                
-            planned_dep = leg.get('plannedDeparture')
-            if not planned_dep:
+        for dep in departures:
+            # Nur Züge in Richtung Stade oder Cuxhaven (die Gegenrichtung ignorieren wir)
+            dest = dep.get('destination', '')
+            if 'Stade' not in dest and 'Cuxhaven' not in dest:
                 continue
                 
-            time_str = planned_dep[11:16]
+            train_name = dep.get('train', {}).get('name', 'Zug')
             
-            # --- 1. TÜRSTEHER: Nur 06:35 bis 07:25 Uhr ---
+            departure_info = dep.get('departure', {})
+            if not departure_info:
+                continue
+                
+            planned_when = departure_info.get('scheduledTime')
+            if not planned_when:
+                continue
+                
+            # Zeit umwandeln (Format ist z.B. '2026-02-26T06:40:00.000Z')
+            time_str = planned_when[11:16]
+            
+            # --- 1. TÜRSTEHER: Nur das exakte Zeitfenster ---
             if time_str < "06:35" or time_str > "07:25":
                 continue
                 
-            # --- 2. TÜRSTEHER: RE und IC blockieren ---
-            if "RE" in line_name.upper() or "IC" in line_name.upper():
+            # --- 2. TÜRSTEHER: RE und IC fliegen rigoros raus ---
+            if "RE" in train_name.upper() or "IC" in train_name.upper():
                 continue
                 
-            verbindungen.append(leg)
+            verbindungen.append(dep)
+            # Wir stoppen, wenn wir 3 gültige Züge (z.B. 06:40, 07:00, 07:20) gefunden haben
             if len(verbindungen) == 3:
                 break
         
@@ -121,20 +104,20 @@ def get_train_connections():
             html_text = "<div class='item' style='color: #888;'>Keine regulären Abfahrten (S5) im Zeitraum gefunden.</div>"
             return plain_text, html_text
             
-        for leg in verbindungen:
-            line_name = leg.get('line', {}).get('name', 'Zug')
-            planned_dep = leg.get('plannedDeparture')
-            delay_sec = leg.get('departureDelay')
-            cancelled = leg.get('cancelled', False)
+        for dep in verbindungen:
+            train_name = dep.get('train', {}).get('name', 'Zug')
+            departure_info = dep.get('departure', {})
+            planned_when = departure_info.get('scheduledTime', '')
+            delay_min = departure_info.get('delay')
+            cancelled = dep.get('cancelled', False)
             
-            if planned_dep:
-                time_str = planned_dep[11:16]
+            if planned_when:
+                time_str = planned_when[11:16]
                 
                 if cancelled:
                     status_str = "❌ FÄLLT AUS!"
                     css_class = "text-bad"
-                elif delay_sec is not None:
-                    delay_min = delay_sec // 60
+                elif delay_min is not None:
                     if delay_min > 0:
                         status_str = f"+{delay_min} Min Verspätung"
                         css_class = "text-bad"
@@ -148,12 +131,12 @@ def get_train_connections():
                     status_str = "Pünktlich (Plan)"
                     css_class = "text-ok"
                 
-                plain_text += f"- {time_str} Uhr | {line_name} ({status_str})\n"
+                plain_text += f"- {time_str} Uhr | {train_name} ({status_str})\n"
                 
                 html_text += f"""
                 <div class='item'>
                     <span style='color: #fff; font-size: 15px;'>{time_str} Uhr</span> | 
-                    <span class='badge'>{line_name}</span> 
+                    <span class='badge'>{train_name}</span> 
                     <span class='{css_class}'>{status_str}</span>
                 </div>
                 """
