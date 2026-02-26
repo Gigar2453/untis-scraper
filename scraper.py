@@ -1,49 +1,3 @@
-import os
-import smtplib
-from email.message import EmailMessage
-import webuntis
-import datetime
-import urllib.request
-import urllib.parse
-import json
-from zoneinfo import ZoneInfo
-
-def send_mail(plain_content, html_content, datum_fuer_betreff):
-    msg = EmailMessage()
-    msg['Subject'] = f"Stundenplan & Zug-Check: {datum_fuer_betreff:%d.%m.%Y}"
-    msg['From'] = os.getenv("EMAIL_SENDER")
-    msg['To'] = os.getenv("EMAIL_RECEIVER")
-    
-    # Prüfen, ob eine CC-Adresse hinterlegt ist und hinzufügen
-    cc_receiver = os.getenv("EMAIL_CC")
-    if cc_receiver:
-        msg['Cc'] = cc_receiver
-
-    # Wir schicken beide Versionen mit (Fallback & HTML)
-    msg.set_content(plain_content)
-    msg.add_alternative(html_content, subtype='html')
-
-    try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-            smtp.login(os.getenv("EMAIL_SENDER"), os.getenv("EMAIL_PASSWORD"))
-            smtp.send_message(msg)
-        print("E-Mail erfolgreich versendet!")
-    except Exception as e:
-        print(f"Fehler beim E-Mail-Versand: {e}")
-
-FACH_NAMEN = {
-    "MA": "Mathe", "EK": "Erdkunde", "SP": "Sport", "DE": "Deutsch",
-    "EN": "Englisch", "BI": "Biologie", "CH": "Chemie", "PH": "Physik",
-    "GE": "Geschichte", "KU": "Kunst", "MU": "Musik", "RE": "Religion",
-    "WN": "Werte u. Normen", "PO": "Politik", "FR": "Französisch",
-    "LA": "Latein", "SN": "Spanisch"
-}
-
-STUNDEN_NR = {
-    "08:00": "1.", "08:50": "2.", "09:55": "3.",
-    "10:45": "4.", "11:45": "5.", "12:35": "6."
-}
-
 def get_train_connections():
     plain_text = "🚆 ZUGVERBINDUNG (Agathenburg -> Stade):\n"
     html_text = ""
@@ -51,7 +5,6 @@ def get_train_connections():
     try:
         headers = {'User-Agent': 'untis-scraper-github-Gigar2453'}
         
-        # 1. Station-IDs fest eintragen, um 2 API-Anfragen zu überspringen!
         id_a = "8000424" # Agathenburg
         id_b = "8000096" # Stade
         
@@ -60,43 +13,48 @@ def get_train_connections():
         start_zeit = heute.replace(hour=6, minute=20, second=0, microsecond=0)
         start_zeit_str = urllib.parse.quote(start_zeit.isoformat())
         
-        url_j = f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}&bus=false&regionalExpress=false&nationalExpress=false&national=false&regional=false"
+        # URL entschlackt: Wir erlauben alles (auch SEV-Busse oder REs)!
+        url_j = f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}"
         
         req_j = urllib.request.Request(url_j, headers=headers)
         
-        # Timeout hinzugefügt, damit das Skript nicht ewig hängt
         with urllib.request.urlopen(req_j, timeout=15) as response:
             journeys = json.loads(response.read().decode()).get('journeys', [])
             
-        s_bahnen = []
+        verbindungen = []
         for j in journeys:
             legs = j.get('legs', [])
             if not legs:
                 continue
             leg = legs[0]
-            line_name = leg.get('line', {}).get('name', 'Zug')
+            
+            # Name auslesen (z.B. "S 3" oder "Bus SEV")
+            line_name = leg.get('line', {}).get('name')
+            if not line_name:
+                line_name = leg.get('line', {}).get('productName', 'Zug')
+                
             planned_dep = leg.get('plannedDeparture')
             
             if not planned_dep:
                 continue
                 
             time_str = planned_dep[11:16]
-            if time_str < "06:30" or time_str > "07:40":
-                continue
-            if "S" not in line_name: 
+            
+            # Filter: Nur Abfahrten zwischen 06:20 und 07:50 Uhr
+            if time_str < "06:20" or time_str > "07:50":
                 continue
                 
-            s_bahnen.append(leg)
-            if len(s_bahnen) == 3:
+            verbindungen.append(leg)
+            if len(verbindungen) == 3: # Wir zeigen maximal 3 Verbindungen
                 break
         
-        if not s_bahnen:
-            plain_text += "-> Keine Verbindungen gefunden.\n\n"
-            html_text = "<div class='item'>Keine S-Bahn Verbindungen gefunden.</div>"
+        if not verbindungen:
+            plain_text += "-> Keine Verbindungen im Zeitraum gefunden.\n\n"
+            html_text = "<div class='item' style='color: #888;'>Keine Abfahrten zwischen 06:20 und 07:50 Uhr gefunden.</div>"
             return plain_text, html_text
             
-        for leg in s_bahnen:
-            line_name = leg.get('line', {}).get('name', 'S-Bahn')
+        for leg in verbindungen:
+            line_name = leg.get('line', {}).get('name', 'Zug')
             planned_dep = leg.get('plannedDeparture')
             delay_sec = leg.get('departureDelay')
             cancelled = leg.get('cancelled', False)
@@ -136,128 +94,4 @@ def get_train_connections():
         return plain_text + "\n", html_text
         
     except Exception as e:
-        # Hier wird der genaue Fehlercode ausgegeben!
         return f"Fehler Bahn: {e}\n\n", f"<div class='item text-bad'>API-Fehler: {str(e)}</div>"
-
-def run():
-    print("Starte den Scraper...")
-    try:
-        s = webuntis.Session(
-            server=os.getenv("UNTIS_SERVER"),
-            school=os.getenv("UNTIS_SCHOOL"),
-            username=os.getenv("UNTIS_USER"),
-            password=os.getenv("UNTIS_PASSWORD"),
-            useragent="MeinStundenplanScraper"
-        )
-        s.login()
-        
-        student_id = 10970 
-        student_liste = s.students().filter(id=student_id)
-        
-        if not student_liste:
-            s.logout()
-            print("Fehler: Konnte die Schüler-ID nicht finden!")
-            return
-            
-        student_obj = student_liste[0]
-        heute = datetime.date.today()
-        
-        timetable = s.timetable(student=student_obj, start=heute, end=heute)
-        timetable = sorted(timetable, key=lambda x: x.start)
-        
-        plain_trains, html_trains = get_train_connections()
-        plain_report = plain_trains
-        html_timetable = ""
-        
-        if not timetable:
-            plain_report += f"🏫 STUNDENPLAN:\nAm {heute:%d.%m.%Y} findet kein Unterricht statt."
-            html_timetable = "<div class='item' style='color: #2ecc71;'>Kein Unterricht heute! 🎉</div>"
-        else:
-            plain_report += f"🏫 PERSÖNLICHER STUNDENPLAN am {heute:%d.%m.%Y}:\n\n"
-            
-            for lesson in timetable:
-                start_zeit = lesson.start.strftime('%H:%M')
-                end_zeit = lesson.end.strftime('%H:%M')
-                fach_abk = lesson.subjects[0].name if lesson.subjects else "Unbekannt"
-                
-                if start_zeit >= "13:50" or "AG" in fach_abk:
-                    continue
-                
-                fach_voll = FACH_NAMEN.get(fach_abk, fach_abk)
-                stunde = STUNDEN_NR.get(start_zeit, "?.")
-                
-                lehrer = lesson.teachers[0].name if lesson.teachers else "Unbekannt"
-                raum = lesson.rooms[0].name if lesson.rooms else "Unbekannt"
-                
-                if lesson.code == "cancelled":
-                    status_plain = "!! ENTFÄLLT !!"
-                    status_html = "ENTFÄLLT"
-                    css_status = "text-bad"
-                else:
-                    status_plain = "Findet statt"
-                    status_html = "Findet statt"
-                    css_status = "text-ok"
-                
-                plain_report += f"{stunde} Stunde {start_zeit} - {end_zeit} | {fach_voll} bei {lehrer} in Raum {raum} -> {status_plain}\n"
-                
-                # HTML Block für EINE Stunde
-                html_timetable += f"""
-                <div class='item'>
-                    <div class='time-text'>{stunde} Stunde ({start_zeit} - {end_zeit})</div>
-                    <div style='color: #eee;'>
-                        <span class='badge'>{fach_voll}</span> bei {lehrer} in Raum <span class='text-hl'>{raum}</span> 
-                        <span class='{css_status}'>-> {status_html}</span>
-                    </div>
-                </div>
-                """
-        
-        s.logout()
-        
-        # --- HIER WIRD DAS DESIGN ZUSAMMENGEBAUT ---
-        html_final = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <style>
-            body {{ background-color: #121212; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #ddd; margin: 0; padding: 20px; line-height: 1.5; }}
-            .wrapper {{ background-color: #1a1a1a; max-width: 650px; margin: 0 auto; border-radius: 8px; border-top: 4px solid #ff9800; box-shadow: 0 4px 15px rgba(0,0,0,0.5); padding: 25px; }}
-            .terminal-header {{ font-family: monospace; color: #777; font-size: 13px; border-bottom: 1px dashed #444; padding-bottom: 12px; margin-bottom: 25px; }}
-            .section {{ background-color: #222; padding: 18px; border-radius: 6px; margin-bottom: 25px; }}
-            .train-border {{ border-left: 4px solid #e74c3c; }}
-            .school-border {{ border-left: 4px solid #3498db; }}
-            .section-title {{ font-weight: bold; color: #fff; text-transform: uppercase; margin-top: 0; margin-bottom: 15px; font-size: 15px; letter-spacing: 1px; }}
-            .item {{ background-color: #2a2a2a; padding: 12px 15px; margin-bottom: 10px; border-radius: 4px; border-left: 2px solid #555; }}
-            .badge {{ display: inline-block; background-color: #444; color: #fff; padding: 3px 8px; border-radius: 3px; font-size: 13px; font-weight: bold; margin-right: 8px; }}
-            .text-hl {{ color: #f39c12; font-weight: bold; }}
-            .text-ok {{ color: #2ecc71; font-size: 13px; float: right; font-weight: bold; }}
-            .text-bad {{ color: #e74c3c; font-weight: bold; font-size: 13px; float: right; }}
-            .time-text {{ color: #999; font-size: 12px; margin-bottom: 6px; letter-spacing: 0.5px; text-transform: uppercase; }}
-        </style>
-        </head>
-        <body>
-            <div class="wrapper">
-                <div class="terminal-header">
-                    > User: Josefine | Date: {heute:%d.%m.%Y} | Status: Sync Complete
-                </div>
-                
-                <div class="section train-border">
-                    <h3 class="section-title">🚆 Zugverbindungen</h3>
-                    {html_trains}
-                </div>
-
-                <div class="section school-border">
-                    <h3 class="section-title">🏫 Stundenplan</h3>
-                    {html_timetable}
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        send_mail(plain_report, html_final, heute)
-        
-    except Exception as e:
-        print(f"Fehler in Untis-Abfrage: {e}")
-
-if __name__ == "__main__":
-    run()
