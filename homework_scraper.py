@@ -39,7 +39,7 @@ def extract_exams_html(raw_exams_text):
     
     html = """
                 <h3 style="margin: 30px 0 20px 0; color: #ffeb3b; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #444444; padding-bottom: 8px;">
-                    🏆 Anstehende Prüfungen (nächste 4 Wochen)
+                    🏆 Anstehende Prüfungen (nächsten 4 Wochen)
                 </h3>
     """
     
