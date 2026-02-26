@@ -44,14 +44,12 @@ def extract_exams_html(raw_exams_text):
     """
     
     exams_found = []
-    # Wir teilen den Text an unserem geheimen Trennzeichen (wird im Bot-Loop eingefügt)
     blocks = raw_exams_text.split("---EXAM---")
     
     for block in blocks:
         if not block.strip():
             continue
             
-        # 1. Datum suchen (Format 27.2.2026 oder 27.02.2026)
         date_match = re.search(r'(\d{1,2}\.\d{1,2}\.202\d)', block)
         if not date_match:
             continue
@@ -62,21 +60,18 @@ def extract_exams_html(raw_exams_text):
         except:
             continue
             
-        # 2. Fach suchen
         fach_gefunden = "Prüfung"
         for abk, voll in FACH_NAMEN.items():
             if re.search(rf'\b{abk}\b', block):
                 fach_gefunden = voll
                 break
                 
-        # 3. Beschreibung suchen (Die Zeile, die das Wort 'Prüfung' oder 'Klassenarbeit' enthält)
         desc = "Klassenarbeit / Test"
         lines = [l.strip() for l in block.split('\n') if l.strip()]
         for line in lines:
             if "Prüfung:" in line or "Klassenarbeit:" in line:
                 desc = line
                 break
-        # Falls nichts Spezifisches gefunden wurde, nehmen wir einfach die erste längere Textzeile
         if desc == "Klassenarbeit / Test" and len(lines) > 3:
             for line in lines:
                 if "Prüfung" in line and len(line) > 10:
@@ -91,7 +86,6 @@ def extract_exams_html(raw_exams_text):
             "raw": block
         })
     
-    # Duplikate filtern (falls wir eine Woche doppelt scannen)
     unique_exams = []
     seen = set()
     for ex in exams_found:
@@ -213,34 +207,48 @@ def extract_homework_text(raw_text):
             <div style="padding: 25px;">
     """
 
+    # --- NEUE GRUPPIERUNGS-LOGIK ---
     html += """
                 <div style="margin-bottom: 30px; background-color: #2a1b1b; border-left: 4px solid #ff5252; padding: 15px; border-radius: 0 4px 4px 0;">
                     <h3 style="margin: 0 0 15px 0; color: #ff5252; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">📝 In dieser Woche aufgegeben</h3>
     """
     if diese_woche_aufgegeben:
-        for i, hw in enumerate(diese_woche_aufgegeben):
-            safe_text = hw['text'].replace('\n', '<br>')
+        # Gruppieren nach dem Aufgabe-Datum
+        hw_by_aufgabe_datum = {}
+        for hw in diese_woche_aufgegeben:
+            datum = hw['aufgabe_datum']
+            if datum not in hw_by_aufgabe_datum:
+                hw_by_aufgabe_datum[datum] = []
+            hw_by_aufgabe_datum[datum].append(hw)
+            
+        for i, (datum, aufgaben) in enumerate(hw_by_aufgabe_datum.items()):
             try:
-                a_date_obj = datetime.datetime.strptime(hw["aufgabe_datum"], "%d.%m.%Y").date()
+                a_date_obj = datetime.datetime.strptime(datum, "%d.%m.%Y").date()
                 wochentag = tage_namen[a_date_obj.weekday()]
-                anzeige_datum = f"{wochentag}, {hw['aufgabe_datum']}"
+                anzeige_datum = f"{wochentag}, {datum}"
             except:
-                anzeige_datum = hw['aufgabe_datum']
+                anzeige_datum = datum
                 
-            border_style = "border-bottom: 1px solid rgba(255, 82, 82, 0.2); margin-bottom: 12px; padding-bottom: 12px;" if i < len(diese_woche_aufgegeben) - 1 else "margin-bottom: 0;"
+            border_style = "border-bottom: 1px solid rgba(255, 82, 82, 0.2); margin-bottom: 12px; padding-bottom: 12px;" if i < len(hw_by_aufgabe_datum) - 1 else "margin-bottom: 0;"
             
             html += f"""
                 <div style="{border_style}">
-                    <div style="margin-bottom: 6px;">
+                    <div style="margin-bottom: 10px;">
                         <span style="color: #ff8a80; font-weight: bold; font-size: 13px;">📅 {anzeige_datum}</span>
-                        <span style="color: #aaaaaa; font-size: 12px; margin-left: 8px; font-style: italic;">(Fällig: {hw['faellig_datum']})</span>
                     </div>
-                    <div style="display: table;">
-                        <span style="background-color: #ff5252; padding: 2px 6px; border-radius: 3px; font-size: 11px; color: #1e1e1e; font-weight: bold; margin-right: 10px; display: table-cell; white-space: nowrap;">{hw['fach']}</span>
-                        <span style="color: #e0e0e0; font-size: 14px; display: table-cell; padding-top: 1px;">{safe_text}</span>
-                    </div>
-                </div>
             """
+            for hw in aufgaben:
+                safe_text = hw['text'].replace('\n', '<br>')
+                html += f"""
+                    <div style="display: table; margin-bottom: 8px;">
+                        <span style="background-color: #ff5252; padding: 2px 6px; border-radius: 3px; font-size: 11px; color: #1e1e1e; font-weight: bold; margin-right: 10px; display: table-cell; white-space: nowrap;">{hw['fach']}</span>
+                        <div style="display: table-cell; padding-top: 1px;">
+                            <span style="color: #e0e0e0; font-size: 14px;">{safe_text}</span>
+                            <span style="color: #888888; font-size: 11px; margin-left: 6px; font-style: italic;">(Fällig: {hw['faellig_datum']})</span>
+                        </div>
+                    </div>
+                """
+            html += "</div>"
     else:
         html += '<p style="margin: 0; color: #d0d0d0; font-size: 14px;">-> Bisher wurden diese Woche keine Aufgaben ins System eingetragen.</p>'
     html += "</div>"
@@ -299,9 +307,6 @@ def run():
             
             page.wait_for_load_state("networkidle", timeout=20000)
             
-            # -------------------------------------------------------------
-            # 1. HAUSAUFGABEN (Bleibt wie gehabt)
-            # -------------------------------------------------------------
             print("Navigiere zur Hausaufgaben-Übersicht...")
             page.goto("https://gym-athenaeum-stade.webuntis.com/student-homework")
             page.wait_for_load_state("networkidle", timeout=20000)
@@ -336,15 +341,10 @@ def run():
                 except:
                     continue
 
-            # -------------------------------------------------------------
-            # 2. PRÜFUNGEN (Der Hacker-Weg über den Stundenplan)
-            # -------------------------------------------------------------
             print("Wechsle zum Stundenplan für Prüfungs-Scan...")
             try:
-                # Klickt in der Seitenleiste auf den Link "Mein Stundenplan"
                 page.get_by_text("Mein Stundenplan", exact=False).first.click()
             except:
-                # Notfall-Navigation, falls die Seitenleiste zugeklappt ist
                 page.goto("https://gym-athenaeum-stade.webuntis.com/WebUntis/index.do#/basic/timetable")
             
             page.wait_for_load_state("networkidle")
@@ -352,54 +352,45 @@ def run():
             
             raw_exams_text = ""
             
-            # Wir blättern 4 Wochen durch
             for woche in range(4):
                 print(f"Scanne Woche {woche + 1} nach Prüfungen...")
-                page.wait_for_timeout(2000) # WebUntis rendert manchmal langsam
+                page.wait_for_timeout(2000) 
                 
-                # Wir suchen nach den gelben Punkten aus deinem Screenshot!
                 indicators = page.locator('div[data-testid="lesson-card-indicator-exam"]')
                 count = indicators.count()
                 print(f"-> {count} Prüfungen in dieser Woche gefunden.")
                 
                 for i in range(count):
                     try:
-                        # Klickt den gelben Punkt an
                         indicators.nth(i).click(force=True)
-                        page.wait_for_timeout(1000) # Warten auf das Pop-up
+                        page.wait_for_timeout(1000)
                         
-                        # Liest den Text aus dem Pop-up (modal-container aus deinem Code)
                         modal = page.locator('.modal-container')
                         if modal.count() > 0:
                             text = modal.first.inner_text()
                             raw_exams_text += "---EXAM---\n" + text + "\n"
                         
-                        # Schließt das Pop-up wieder
                         page.keyboard.press("Escape")
                         page.wait_for_timeout(500)
                     except Exception as e:
                         print(f"Konnte Prüfung nicht auslesen: {e}")
                 
-                # Nächste Woche klicken (sucht nach dem Button mit "Nächste Woche" im Code)
+                # --- NEUER BLÄTTER-MECHANISMUS AUS DEINEM SCREENSHOT ---
                 try:
-                    next_btn = page.locator('button[title="Nächste Woche"], button[aria-label="Nächste Woche"]').first
+                    next_btn = page.locator('button[data-testid="date-picker-with-arrows-next"]').first
                     if next_btn.count() > 0:
                         next_btn.click()
+                        print("Erfolgreich zur nächsten Woche geblättert.")
                     else:
-                        print("Pfeil-Button nicht gefunden, versuche Alternative...")
-                        # Klickt den Button rechts neben "Heute"
-                        page.locator('button:has-text("Heute") + button').first.click()
+                        print("Pfeil-Button nicht gefunden. Breche Loop ab.")
+                        break
                 except Exception as e:
-                    print("Konnte nicht zur nächsten Woche blättern. Breche Loop ab.")
+                    print(f"Konnte nicht zur nächsten Woche blättern. Breche Loop ab: {e}")
                     break
 
-            # -------------------------------------------------------------
-            # 3. ZUSAMMENBAUEN & SENDEN
-            # -------------------------------------------------------------
             report_html = extract_homework_text(raw_homework_text)
             exams_html = extract_exams_html(raw_exams_text)
             
-            # Fügt die Prüfungen elegant vor dem Ende des Dashboards ein
             schliessende_tags = '</div>\n        </div>\n    </div>'
             if schliessende_tags in report_html:
                 final_html = report_html.replace(schliessende_tags, f'{exams_html}\n{schliessende_tags}')
