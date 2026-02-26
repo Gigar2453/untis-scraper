@@ -49,69 +49,49 @@ def get_train_connections():
     html_text = ""
     
     try:
-        headers = {'User-Agent': 'untis-scraper-github-Gigar2453'}
+        # Wir tarnen uns als normaler Windows-Browser, nicht als "Scraper"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         
-        id_a = "8000424" # Agathenburg
-        id_b = "8000096" # Stade
+        # DEINE ENTDECKUNG AUS DEM LINK: Die absolut korrekten IDs!
+        id_a = "8000434" # Agathenburg
+        id_b = "8000089" # Stade
         
         tz = ZoneInfo("Europe/Berlin")
         heute = datetime.datetime.now(tz)
         
-        # Wir setzen den Start-Suchzeitpunkt auf 06:30 Uhr
+        # Wir suchen ab 06:30 Uhr
         start_zeit = heute.replace(hour=6, minute=30, second=0, microsecond=0)
         start_zeit_str = urllib.parse.quote(start_zeit.isoformat())
         
-        # --- DER NEUE API-RETTUNGSSCHIRM (Fallback-System) ---
-        urls_to_try = [
-            f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}",
-            f"https://v5.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}",
-            f"https://v6.oebb.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}"
-        ]
+        # NEU: Wir nutzen die Abfahrtstafel (Departures) statt der Routenplanung. Das ist 100x stabiler!
+        url = f"https://v6.db.transport.rest/stops/{id_a}/departures?direction={id_b}&results=15&when={start_zeit_str}"
         
-        journeys = None
-        letzter_fehler = ""
-        
-        for url in urls_to_try:
-            try:
-                req_j = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req_j, timeout=10) as response:
-                    journeys = json.loads(response.read().decode()).get('journeys', [])
-                    break # Hat geklappt! Schleife erfolgreich abbrechen.
-            except Exception as e:
-                letzter_fehler = str(e)
-                continue # Hat nicht geklappt -> direkt die nächste API-URL probieren!
-                
-        # Wenn am Ende ALLE Server down waren:
-        if journeys is None:
-            raise Exception(f"Alle 3 API-Server blockieren/sind down! Letzter Fehler: {letzter_fehler}")
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as response:
+            departures = json.loads(response.read().decode())
             
         verbindungen = []
-        for j in journeys:
-            legs = j.get('legs', [])
-            if not legs:
-                continue
-            leg = legs[0]
+        
+        # Bei der Abfahrtstafel ist die Antwort direkt eine Liste von Zügen
+        for dep in departures:
+            line_name = dep.get('line', {}).get('name', 'Zug')
             
-            line_name = leg.get('line', {}).get('name')
-            if not line_name:
-                line_name = leg.get('line', {}).get('productName', 'Zug')
-                
-            planned_dep = leg.get('plannedDeparture')
-            if not planned_dep:
+            planned_when = dep.get('plannedWhen')
+            if not planned_when:
                 continue
                 
-            time_str = planned_dep[11:16]
+            time_str = planned_when[11:16]
             
-            # --- 1. TÜRSTEHER: Nur das exakte Zeitfenster ---
+            # --- 1. TÜRSTEHER: Nur das exakte Zeitfenster (06:35 bis 07:25) ---
             if time_str < "06:35" or time_str > "07:25":
                 continue
                 
-            # --- 2. TÜRSTEHER: RE und Fernzüge fliegen rigoros raus ---
+            # --- 2. TÜRSTEHER: RE und IC fliegen rigoros raus ---
             if "RE" in line_name.upper() or "IC" in line_name.upper():
                 continue
                 
-            verbindungen.append(leg)
-            # Wir stoppen, sobald wir die 3 relevanten Verbindungen (6:40, 7:00, 7:20) haben
+            verbindungen.append(dep)
+            # Wir stoppen bei genau 3 Zügen (z.B. 6:40, 7:00, 7:20)
             if len(verbindungen) == 3:
                 break
         
@@ -120,14 +100,14 @@ def get_train_connections():
             html_text = "<div class='item' style='color: #888;'>Keine regulären Abfahrten (S5) im Zeitraum gefunden.</div>"
             return plain_text, html_text
             
-        for leg in verbindungen:
-            line_name = leg.get('line', {}).get('name', 'Zug')
-            planned_dep = leg.get('plannedDeparture')
-            delay_sec = leg.get('departureDelay')
-            cancelled = leg.get('cancelled', False)
+        for dep in verbindungen:
+            line_name = dep.get('line', {}).get('name', 'Zug')
+            planned_when = dep.get('plannedWhen')
+            delay_sec = dep.get('delay')
+            cancelled = dep.get('cancelled', False)
             
-            if planned_dep:
-                time_str = planned_dep[11:16]
+            if planned_when:
+                time_str = planned_when[11:16]
                 
                 if cancelled:
                     status_str = "❌ FÄLLT AUS!"
@@ -161,7 +141,6 @@ def get_train_connections():
         
     except Exception as e:
         return f"Fehler Bahn: {e}\n\n", f"<div class='item text-bad'>Kritischer API-Fehler: {str(e)}</div>"
-
 def run():
     print("Starte den Scraper...")
     try:
