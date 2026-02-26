@@ -49,44 +49,34 @@ def get_train_connections():
     html_text = ""
     
     try:
-        # Tarnung als normaler Browser
+        # Tarnung als normaler Windows-Browser
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         
-        # Agathenburg
-        id_a = "8000434" 
-        
-        # NEU: Wir nutzen die bahn.expert IRIS-API (Das System der echten Anzeigetafeln am Bahnsteig!)
-        # lookahead=120 sucht alle Züge der nächsten 120 Minuten ab dem Moment, wo das Skript morgens läuft
-        url = f"https://bahn.expert/api/iris/v2/abfahrten/{id_a}?lookahead=120"
+        # NEU: Wir nutzen das extrem stabile DBF-Projekt (IRIS Backend). 
+        # Das liest direkt die echten digitalen Abfahrtstafeln aus!
+        url = "https://dbf.finalrewind.org/Agathenburg.json?version=3"
         
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as response:
             data = json.loads(response.read().decode())
             
-        # bahn.expert packt alles in die Liste 'departures'
         departures = data.get('departures', [])
         
         verbindungen = []
         for dep in departures:
-            # Nur Züge in Richtung Stade oder Cuxhaven (die Gegenrichtung ignorieren wir)
+            # Nur Züge in Richtung Stade / Cuxhaven
             dest = dep.get('destination', '')
             if 'Stade' not in dest and 'Cuxhaven' not in dest:
                 continue
                 
-            train_name = dep.get('train', {}).get('name', 'Zug')
+            train_name = dep.get('train', '')
             
-            departure_info = dep.get('departure', {})
-            if not departure_info:
+            # DBF liefert die Zeiten als Format "HH:MM"
+            time_str = dep.get('scheduledDeparture', '')
+            if not time_str:
                 continue
                 
-            planned_when = departure_info.get('scheduledTime')
-            if not planned_when:
-                continue
-                
-            # Zeit umwandeln (Format ist z.B. '2026-02-26T06:40:00.000Z')
-            time_str = planned_when[11:16]
-            
-            # --- 1. TÜRSTEHER: Nur das exakte Zeitfenster ---
+            # --- 1. TÜRSTEHER: Nur das exakte Zeitfenster (06:35 - 07:25 Uhr) ---
             if time_str < "06:35" or time_str > "07:25":
                 continue
                 
@@ -95,7 +85,7 @@ def get_train_connections():
                 continue
                 
             verbindungen.append(dep)
-            # Wir stoppen, wenn wir 3 gültige Züge (z.B. 06:40, 07:00, 07:20) gefunden haben
+            # Wir stoppen, wenn wir die 3 relevanten Züge (06:40, 07:00, 07:20) haben
             if len(verbindungen) == 3:
                 break
         
@@ -105,19 +95,25 @@ def get_train_connections():
             return plain_text, html_text
             
         for dep in verbindungen:
-            train_name = dep.get('train', {}).get('name', 'Zug')
-            departure_info = dep.get('departure', {})
-            planned_when = departure_info.get('scheduledTime', '')
-            delay_min = departure_info.get('delay')
-            cancelled = dep.get('cancelled', False)
-            
-            if planned_when:
-                time_str = planned_when[11:16]
+            train_name = dep.get('train', 'S-Bahn')
+            time_str = dep.get('scheduledDeparture', '')
                 
-                if cancelled:
-                    status_str = "❌ FÄLLT AUS!"
-                    css_class = "text-bad"
-                elif delay_min is not None:
+            # Verspätungen auslesen
+            delay_min = dep.get('delayDeparture')
+            if delay_min is None:
+                delay_min = dep.get('delay')
+                
+            # Ausfälle auslesen
+            cancelled = dep.get('isCancelled', False)
+            if not cancelled:
+                cancelled = dep.get('cancelled', False)
+            
+            if cancelled:
+                status_str = "❌ FÄLLT AUS!"
+                css_class = "text-bad"
+            elif delay_min is not None:
+                try:
+                    delay_min = int(delay_min)
                     if delay_min > 0:
                         status_str = f"+{delay_min} Min Verspätung"
                         css_class = "text-bad"
@@ -127,24 +123,28 @@ def get_train_connections():
                     else:
                         status_str = "Pünktlich"
                         css_class = "text-ok"
-                else:
-                    status_str = "Pünktlich (Plan)"
+                except:
+                    status_str = "Pünktlich"
                     css_class = "text-ok"
-                
-                plain_text += f"- {time_str} Uhr | {train_name} ({status_str})\n"
-                
-                html_text += f"""
-                <div class='item'>
-                    <span style='color: #fff; font-size: 15px;'>{time_str} Uhr</span> | 
-                    <span class='badge'>{train_name}</span> 
-                    <span class='{css_class}'>{status_str}</span>
-                </div>
-                """
-                
+            else:
+                status_str = "Pünktlich (Plan)"
+                css_class = "text-ok"
+            
+            plain_text += f"- {time_str} Uhr | {train_name} ({status_str})\n"
+            
+            html_text += f"""
+            <div class='item'>
+                <span style='color: #fff; font-size: 15px;'>{time_str} Uhr</span> | 
+                <span class='badge'>{train_name}</span> 
+                <span class='{css_class}'>{status_str}</span>
+            </div>
+            """
+            
         return plain_text + "\n", html_text
         
     except Exception as e:
         return f"Fehler Bahn: {e}\n\n", f"<div class='item text-bad'>Kritischer API-Fehler: {str(e)}</div>"
+        
 def run():
     print("Starte den Scraper...")
     try:
