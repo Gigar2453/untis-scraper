@@ -56,10 +56,11 @@ def get_train_connections():
         
         tz = ZoneInfo("Europe/Berlin")
         heute = datetime.datetime.now(tz)
-        start_zeit = heute.replace(hour=6, minute=20, second=0, microsecond=0)
+        
+        # Wir setzen den Start-Suchzeitpunkt auf 06:30 Uhr
+        start_zeit = heute.replace(hour=6, minute=30, second=0, microsecond=0)
         start_zeit_str = urllib.parse.quote(start_zeit.isoformat())
         
-        # URL entschlackt: Wir erlauben alles (auch SEV-Busse oder REs)!
         url_j = f"https://v6.db.transport.rest/journeys?from={id_a}&to={id_b}&results=10&departure={start_zeit_str}"
         
         req_j = urllib.request.Request(url_j, headers=headers)
@@ -74,29 +75,32 @@ def get_train_connections():
                 continue
             leg = legs[0]
             
-            # Name auslesen (z.B. "S 3" oder "Bus SEV")
             line_name = leg.get('line', {}).get('name')
             if not line_name:
                 line_name = leg.get('line', {}).get('productName', 'Zug')
                 
             planned_dep = leg.get('plannedDeparture')
-            
             if not planned_dep:
                 continue
                 
             time_str = planned_dep[11:16]
             
-            # Filter: Nur Abfahrten zwischen 06:20 und 07:50 Uhr
-            if time_str < "06:20" or time_str > "07:50":
+            # --- 1. TÜRSTEHER: Nur das exakte Zeitfenster ---
+            if time_str < "06:35" or time_str > "07:25":
+                continue
+                
+            # --- 2. TÜRSTEHER: RE und Fernzüge fliegen raus ---
+            if "RE" in line_name.upper() or "IC" in line_name.upper():
                 continue
                 
             verbindungen.append(leg)
-            if len(verbindungen) == 3: # Wir zeigen maximal 3 Verbindungen
+            # Wir stoppen, sobald wir 3 gültige Verbindungen haben (6:40, 7:00, 7:20)
+            if len(verbindungen) == 3:
                 break
         
         if not verbindungen:
-            plain_text += "-> Keine Verbindungen im Zeitraum gefunden.\n\n"
-            html_text = "<div class='item' style='color: #888;'>Keine Abfahrten zwischen 06:20 und 07:50 Uhr gefunden.</div>"
+            plain_text += "-> Keine passenden S-Bahnen gefunden.\n\n"
+            html_text = "<div class='item' style='color: #888;'>Keine regulären Abfahrten (S5) im Zeitraum gefunden.</div>"
             return plain_text, html_text
             
         for leg in verbindungen:
@@ -128,7 +132,6 @@ def get_train_connections():
                 
                 plain_text += f"- {time_str} Uhr | {line_name} ({status_str})\n"
                 
-                # HTML Block für EINE Bahn
                 html_text += f"""
                 <div class='item'>
                     <span style='color: #fff; font-size: 15px;'>{time_str} Uhr</span> | 
