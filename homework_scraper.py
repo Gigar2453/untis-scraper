@@ -20,7 +20,7 @@ def send_mail(report_html):
     msg['From'] = os.getenv("EMAIL_SENDER")
     msg['To'] = os.getenv("EMAIL_RECEIVER")
     
-    msg['Cc'] = "michelesobe0701@gmx.de"
+    msg['Cc'] = ""
     
     msg.set_content("Bitte aktiviere HTML in deinem E-Mail-Programm, um das Dashboard zu sehen.")
     msg.add_alternative(report_html, subtype='html')
@@ -312,22 +312,35 @@ def run():
             page.wait_for_load_state("networkidle", timeout=20000)
             page.wait_for_timeout(3000) 
             
+            # --- START: NEUER DROPDOWN-KLICK ---
             try:
                 target_frame = None
                 for f in page.frames:
-                    if f.locator('.Select-control').count() > 0:
+                    if f.get_by_text("Monat").count() > 0 or f.get_by_text("2025/2026").count() > 0:
                         target_frame = f
                         break
+                
                 if target_frame:
-                    target_frame.locator('.Select-control').first.click()
-                    page.wait_for_timeout(1000) 
                     heute_calc = datetime.date.today()
                     schuljahr_str = f"{heute_calc.year - 1}/{heute_calc.year}" if heute_calc.month < 8 else f"{heute_calc.year}/{heute_calc.year + 1}"
-                    target_frame.get_by_text(schuljahr_str, exact=True).first.click()
-                    page.wait_for_load_state("networkidle", timeout=15000)
-                    page.wait_for_timeout(3000)
+                    
+                    print("Klicke auf das Dropdown 'Monat'...")
+                    dropdown = target_frame.get_by_text("Monat", exact=True).first
+                    if dropdown.is_visible():
+                        dropdown.click()
+                        page.wait_for_timeout(1000)
+                        
+                        print(f"Wähle Schuljahr {schuljahr_str} aus...")
+                        target_frame.get_by_text(schuljahr_str, exact=True).first.click()
+                        
+                        print("Warte auf das Nachladen der Jahresübersicht...")
+                        page.wait_for_load_state("networkidle", timeout=20000)
+                        page.wait_for_timeout(4000) 
+                    else:
+                        print("Dropdown 'Monat' war nicht sichtbar, evtl. ist es schon umgestellt.")
             except Exception as drop_e:
-                print(f"Dropdown-Klick fehlgeschlagen: {drop_e}")
+                print(f"Fehler beim Wechseln auf die Jahresübersicht: {drop_e}")
+            # --- ENDE: NEUER DROPDOWN-KLICK ---
 
             raw_homework_text = ""
             try:
@@ -375,7 +388,7 @@ def run():
                     except Exception as e:
                         print(f"Konnte Prüfung nicht auslesen: {e}")
                 
-                # --- NEUER BLÄTTER-MECHANISMUS AUS DEINEM SCREENSHOT ---
+                # --- BLÄTTER-MECHANISMUS ---
                 try:
                     next_btn = page.locator('button[data-testid="date-picker-with-arrows-next"]').first
                     if next_btn.count() > 0:
