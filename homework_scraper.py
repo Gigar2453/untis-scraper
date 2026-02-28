@@ -20,7 +20,7 @@ def send_mail(report_html):
     msg['From'] = os.getenv("EMAIL_SENDER")
     msg['To'] = os.getenv("EMAIL_RECEIVER")
     
-    msg['Cc'] = ""
+    msg['Cc'] = "michelesobe0701@gmx.de"
     
     msg.set_content("Bitte aktiviere HTML in deinem E-Mail-Programm, um das Dashboard zu sehen.")
     msg.add_alternative(report_html, subtype='html')
