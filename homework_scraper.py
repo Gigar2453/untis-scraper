@@ -119,19 +119,28 @@ def extract_exams_html(raw_exams_text):
     return html
 
 def extract_homework_text(raw_text):
-    start_idx = raw_text.find("Bald fällig")
-    if start_idx == -1:
-        return f'<div style="background:#222; color:#fff; padding:20px;"><h3>Fehler: Bereich "Bald fällig" nicht gefunden.</h3></div>'
-        
-    end_idx = raw_text.find("Verpasst", start_idx)
-    if end_idx == -1:
-        end_idx = raw_text.find("Abgeschlossen", start_idx)
-    if end_idx == -1:
-        end_idx = len(raw_text)
-        
-    target_text = raw_text[start_idx + len("Bald fällig"):end_idx]
+    # 1. Den Tabellenkopf abschneiden (Wir starten nach "Fälligkeitsdatum")
+    start_idx = raw_text.find("Fälligkeitsdatum")
+    if start_idx != -1:
+        raw_text = raw_text[start_idx + len("Fälligkeitsdatum"):]
+
+    # 2. Das Ende finden: Wir wollen nichts aus "Verpasst" oder "Abgeschlossen"
+    verpasst_idx = raw_text.find("Verpasst")
+    abgeschlossen_idx = raw_text.find("Abgeschlossen")
+
+    # Wir suchen den ersten dieser beiden Begriffe, der auftaucht
+    end_indices = [idx for idx in [verpasst_idx, abgeschlossen_idx] if idx != -1]
+    if end_indices:
+        end_idx = min(end_indices)
+        target_text = raw_text[:end_idx]
+    else:
+        target_text = raw_text # Falls es keine verpassten/abgeschlossenen gibt
+
+    # 3. Störende Zwischenüberschriften löschen, falls sie existieren
+    target_text = target_text.replace("Bald fällig", "")
     target_text = target_text.replace("Noch nicht abgeschlossen", "")
     
+    # 4. Mit Regex die Aufgaben herausfiltern
     pattern = r'([A-ZÄÖÜ]{2,3})\s*[A-ZÄÖÜ]{2,4}\s*(\d{2}\.\d{2}\.202\d)\s*([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)\s*Hausaufgabe'
     parts = re.split(pattern, target_text)
     
@@ -150,8 +159,9 @@ def extract_homework_text(raw_text):
     heute_str = heute.strftime("%d.%m.%Y")
     tage_namen = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
     
+    # Wenn die Liste leer ist, gibt es wirklich gar keine Aufgaben
     if not hw_list:
-        return f'<div style="background:#121212; color:#fff; padding:20px;"><h3>🎉 Keine einzige Aufgabe im System. Zurücklehnen!</h3></div>'
+        return f'<div style="background:#121212; color:#fff; padding:20px; border-radius: 6px; text-align: center;"><h3>🎉 Keine einzige Aufgabe im System. Zurücklehnen!</h3></div>'
 
     montag_assigned = heute - datetime.timedelta(days=heute.weekday())
     freitag_assigned = montag_assigned + datetime.timedelta(days=4)
@@ -207,13 +217,11 @@ def extract_homework_text(raw_text):
             <div style="padding: 25px;">
     """
 
-    # --- NEUE GRUPPIERUNGS-LOGIK ---
     html += """
                 <div style="margin-bottom: 30px; background-color: #2a1b1b; border-left: 4px solid #ff5252; padding: 15px; border-radius: 0 4px 4px 0;">
                     <h3 style="margin: 0 0 15px 0; color: #ff5252; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">📝 In dieser Woche aufgegeben</h3>
     """
     if diese_woche_aufgegeben:
-        # Gruppieren nach dem Aufgabe-Datum
         hw_by_aufgabe_datum = {}
         for hw in diese_woche_aufgegeben:
             datum = hw['aufgabe_datum']
