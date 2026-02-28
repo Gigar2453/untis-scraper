@@ -136,16 +136,13 @@ def extract_homework_text(raw_text):
     target_text = target_text.replace("Bald fällig", "")
     target_text = target_text.replace("Noch nicht abgeschlossen", "")
     
-    # Neues Suchmuster, das auch den Lehrer mit einklammert, um saubere 5er-Blöcke zu erhalten
     pattern = r'([A-ZÄÖÜ]{2,3})\s*([A-Za-zÄÖÜäöüß0-9]{2,5})\s*(\d{2}\.\d{2}\.202\d)\s*([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)\s*Hausaufgabe'
     parts = re.split(pattern, target_text)
     
     hw_list = []
-    # Da wir nun 4 eingeklammerte Gruppen haben, wandert der Index in 5er-Schritten
     for i in range(1, len(parts), 5):
         if i + 4 < len(parts):
             fach_abk = parts[i]
-            # parts[i+1] ist der Lehrer, den übergehen wir hier
             aufgabe_datum = parts[i+2]
             faellig_datum = parts[i+3]
             text = parts[i+4].strip()
@@ -158,7 +155,7 @@ def extract_homework_text(raw_text):
     tage_namen = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
     
     if not hw_list:
-        return f'<div style="background:#121212; color:#fff; padding:20px; border-radius: 6px; text-align: center;"><h3>🎉 Keine einzige Aufgabe im System. Zurücklehnen!</h3></div>'
+        return f'<div style="background:#121212; color:#fff; padding:20px; border-radius: 6px; text-align: center;"><h3>🎉 Keine Aufgaben gefunden. Skript hat diese Seite gesehen:</h3><p style="font-size:10px; color:#888;">{target_text[:300]}...</p></div>'
 
     montag_assigned = heute - datetime.timedelta(days=heute.weekday())
     freitag_assigned = montag_assigned + datetime.timedelta(days=4)
@@ -315,50 +312,52 @@ def run():
             print("Navigiere zur Hausaufgaben-Übersicht...")
             page.goto("https://gym-athenaeum-stade.webuntis.com/student-homework")
             page.wait_for_load_state("networkidle", timeout=20000)
-            page.wait_for_timeout(3000) 
+            page.wait_for_timeout(4000) 
             
-            # --- START: NEUER CSS-KLICK FÜR DROPDOWN ---
+            # --- START: ULTIMATIVER REACT-SELECT KLICKER ---
+            heute_calc = datetime.date.today()
+            schuljahr_str = f"{heute_calc.year - 1}/{heute_calc.year}" if heute_calc.month < 8 else f"{heute_calc.year}/{heute_calc.year + 1}"
+            
+            print(f"Versuche auf Schuljahr {schuljahr_str} umzustellen...")
+            erfolg = False
+            
+            def bediene_dropdown(such_kontext):
+                dropdowns = such_kontext.locator('.range-selector .Select-control')
+                if dropdowns.count() > 0:
+                    target = dropdowns.first
+                    if target.is_visible():
+                        print("-> Dropdown gefunden. Führe erzwungenen Klick aus...")
+                        target.click(force=True)
+                        page.wait_for_timeout(1000)
+                        
+                        # Tippe das Schuljahr ein und drücke Enter (Der sicherste Weg für react-select!)
+                        print(f"-> Tippe '{schuljahr_str}' per virtueller Tastatur...")
+                        page.keyboard.type(schuljahr_str)
+                        page.wait_for_timeout(500)
+                        page.keyboard.press("Enter")
+                        return True
+                return False
+
             try:
-                print("Suche Dropdown für Zeitraumauswahl...")
-                dropdown_locator = None
-                
-                # Wir nutzen exakt die CSS-Klassen aus deinem Web-Inspector Screenshot!
-                if page.locator('.range-selector .Select-control').count() > 0:
-                    dropdown_locator = page.locator('.range-selector .Select-control').first
+                # Versuch 1: Auf der Hauptseite
+                if bediene_dropdown(page):
+                    erfolg = True
                 else:
+                    # Versuch 2: In den iFrames suchen
                     for f in page.frames:
-                        if f.locator('.range-selector .Select-control').count() > 0:
-                            dropdown_locator = f.locator('.range-selector .Select-control').first
+                        if bediene_dropdown(f):
+                            erfolg = True
                             break
-                
-                if dropdown_locator:
-                    print("Klicke auf das Dropdown...")
-                    dropdown_locator.click()
-                    page.wait_for_timeout(1000)
-                    
-                    heute_calc = datetime.date.today()
-                    schuljahr_str = f"{heute_calc.year - 1}/{heute_calc.year}" if heute_calc.month < 8 else f"{heute_calc.year}/{heute_calc.year + 1}"
-                    
-                    print(f"Suche nach Schuljahr {schuljahr_str}...")
-                    
-                    # react-select legt die Optionen oft ans Ende des Dokuments
-                    option = page.locator(f'.Select-menu-outer :text-is("{schuljahr_str}")')
-                    if option.count() == 0:
-                         # Fallback
-                         option = page.locator(f'.Select-menu-outer :text("{schuljahr_str}")')
-                         
-                    if option.count() > 0:
-                        option.first.click()
-                        print("Erfolgreich umgestellt! Lade Jahresübersicht...")
-                        page.wait_for_load_state("networkidle", timeout=20000)
-                        page.wait_for_timeout(5000) # Extralange warten, bis die riesige Liste da ist
-                    else:
-                        print("Konnte das Schuljahr im Menü nicht finden.")
+                            
+                if erfolg:
+                    print(f"✅ Befehl gesendet! Warte 5 Sekunden, damit WebUntis das Jahr {schuljahr_str} laden kann...")
+                    page.wait_for_load_state("networkidle", timeout=20000)
+                    page.wait_for_timeout(5000) 
                 else:
-                    print("Konnte das Dropdown '.range-selector' nicht finden.")
+                    print("❌ FEHLER: Konnte das Dropdown '.range-selector' nicht finden.")
             except Exception as drop_e:
-                print(f"Fehler beim Umstellen des Zeitraums: {drop_e}")
-            # --- ENDE: NEUER CSS-KLICK ---
+                print(f"❌ Ausnahme beim Dropdown-Wechsel: {drop_e}")
+            # --- ENDE: ULTIMATIVER REACT-SELECT KLICKER ---
 
             raw_homework_text = ""
             try:
@@ -371,6 +370,8 @@ def run():
                     if text: raw_homework_text += text + "\n"
                 except:
                     continue
+                    
+            print(f"INFO: Ausgelesener Rohtext (erste 150 Zeichen): {raw_homework_text[:150].strip()}")
 
             print("Wechsle zum Stundenplan für Prüfungs-Scan...")
             try:
