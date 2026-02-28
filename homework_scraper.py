@@ -119,38 +119,36 @@ def extract_exams_html(raw_exams_text):
     return html
 
 def extract_homework_text(raw_text):
-    # 1. Den Tabellenkopf abschneiden (Wir starten nach "Fälligkeitsdatum")
     start_idx = raw_text.find("Fälligkeitsdatum")
     if start_idx != -1:
         raw_text = raw_text[start_idx + len("Fälligkeitsdatum"):]
 
-    # 2. Das Ende finden: Wir wollen nichts aus "Verpasst" oder "Abgeschlossen"
     verpasst_idx = raw_text.find("Verpasst")
     abgeschlossen_idx = raw_text.find("Abgeschlossen")
 
-    # Wir suchen den ersten dieser beiden Begriffe, der auftaucht
     end_indices = [idx for idx in [verpasst_idx, abgeschlossen_idx] if idx != -1]
     if end_indices:
         end_idx = min(end_indices)
         target_text = raw_text[:end_idx]
     else:
-        target_text = raw_text # Falls es keine verpassten/abgeschlossenen gibt
+        target_text = raw_text
 
-    # 3. Störende Zwischenüberschriften löschen, falls sie existieren
     target_text = target_text.replace("Bald fällig", "")
     target_text = target_text.replace("Noch nicht abgeschlossen", "")
     
-    # 4. Mit Regex die Aufgaben herausfiltern
-    pattern = r'([A-ZÄÖÜ]{2,3})\s*[A-ZÄÖÜ]{2,4}\s*(\d{2}\.\d{2}\.202\d)\s*([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)\s*Hausaufgabe'
+    # Neues Suchmuster, das auch den Lehrer mit einklammert, um saubere 5er-Blöcke zu erhalten
+    pattern = r'([A-ZÄÖÜ]{2,3})\s*([A-Za-zÄÖÜäöüß0-9]{2,5})\s*(\d{2}\.\d{2}\.202\d)\s*([A-Za-zäöüß]+,\s*\d{2}\.\d{2}\.202\d)\s*Hausaufgabe'
     parts = re.split(pattern, target_text)
     
     hw_list = []
-    for i in range(1, len(parts), 4):
-        if i + 3 < len(parts):
+    # Da wir nun 4 eingeklammerte Gruppen haben, wandert der Index in 5er-Schritten
+    for i in range(1, len(parts), 5):
+        if i + 4 < len(parts):
             fach_abk = parts[i]
-            aufgabe_datum = parts[i+1]
-            faellig_datum = parts[i+2]
-            text = parts[i+3].strip()
+            # parts[i+1] ist der Lehrer, den übergehen wir hier
+            aufgabe_datum = parts[i+2]
+            faellig_datum = parts[i+3]
+            text = parts[i+4].strip()
             
             fach = FACH_NAMEN.get(fach_abk, fach_abk)
             hw_list.append({"fach": fach, "aufgabe_datum": aufgabe_datum, "faellig_datum": faellig_datum, "text": text})
@@ -159,7 +157,6 @@ def extract_homework_text(raw_text):
     heute_str = heute.strftime("%d.%m.%Y")
     tage_namen = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
     
-    # Wenn die Liste leer ist, gibt es wirklich gar keine Aufgaben
     if not hw_list:
         return f'<div style="background:#121212; color:#fff; padding:20px; border-radius: 6px; text-align: center;"><h3>🎉 Keine einzige Aufgabe im System. Zurücklehnen!</h3></div>'
 
@@ -320,35 +317,48 @@ def run():
             page.wait_for_load_state("networkidle", timeout=20000)
             page.wait_for_timeout(3000) 
             
-            # --- START: NEUER DROPDOWN-KLICK ---
+            # --- START: NEUER CSS-KLICK FÜR DROPDOWN ---
             try:
-                target_frame = None
-                for f in page.frames:
-                    if f.get_by_text("Monat").count() > 0 or f.get_by_text("2025/2026").count() > 0:
-                        target_frame = f
-                        break
+                print("Suche Dropdown für Zeitraumauswahl...")
+                dropdown_locator = None
                 
-                if target_frame:
+                # Wir nutzen exakt die CSS-Klassen aus deinem Web-Inspector Screenshot!
+                if page.locator('.range-selector .Select-control').count() > 0:
+                    dropdown_locator = page.locator('.range-selector .Select-control').first
+                else:
+                    for f in page.frames:
+                        if f.locator('.range-selector .Select-control').count() > 0:
+                            dropdown_locator = f.locator('.range-selector .Select-control').first
+                            break
+                
+                if dropdown_locator:
+                    print("Klicke auf das Dropdown...")
+                    dropdown_locator.click()
+                    page.wait_for_timeout(1000)
+                    
                     heute_calc = datetime.date.today()
                     schuljahr_str = f"{heute_calc.year - 1}/{heute_calc.year}" if heute_calc.month < 8 else f"{heute_calc.year}/{heute_calc.year + 1}"
                     
-                    print("Klicke auf das Dropdown 'Monat'...")
-                    dropdown = target_frame.get_by_text("Monat", exact=True).first
-                    if dropdown.is_visible():
-                        dropdown.click()
-                        page.wait_for_timeout(1000)
-                        
-                        print(f"Wähle Schuljahr {schuljahr_str} aus...")
-                        target_frame.get_by_text(schuljahr_str, exact=True).first.click()
-                        
-                        print("Warte auf das Nachladen der Jahresübersicht...")
+                    print(f"Suche nach Schuljahr {schuljahr_str}...")
+                    
+                    # react-select legt die Optionen oft ans Ende des Dokuments
+                    option = page.locator(f'.Select-menu-outer :text-is("{schuljahr_str}")')
+                    if option.count() == 0:
+                         # Fallback
+                         option = page.locator(f'.Select-menu-outer :text("{schuljahr_str}")')
+                         
+                    if option.count() > 0:
+                        option.first.click()
+                        print("Erfolgreich umgestellt! Lade Jahresübersicht...")
                         page.wait_for_load_state("networkidle", timeout=20000)
-                        page.wait_for_timeout(4000) 
+                        page.wait_for_timeout(5000) # Extralange warten, bis die riesige Liste da ist
                     else:
-                        print("Dropdown 'Monat' war nicht sichtbar, evtl. ist es schon umgestellt.")
+                        print("Konnte das Schuljahr im Menü nicht finden.")
+                else:
+                    print("Konnte das Dropdown '.range-selector' nicht finden.")
             except Exception as drop_e:
-                print(f"Fehler beim Wechseln auf die Jahresübersicht: {drop_e}")
-            # --- ENDE: NEUER DROPDOWN-KLICK ---
+                print(f"Fehler beim Umstellen des Zeitraums: {drop_e}")
+            # --- ENDE: NEUER CSS-KLICK ---
 
             raw_homework_text = ""
             try:
