@@ -38,6 +38,7 @@ jobs:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+          EMAIL_CC: ${{ secrets.EMAIL_CC }}
         run: python homework_scraper.py
 
       - name: Deploy to GitHub Pages
