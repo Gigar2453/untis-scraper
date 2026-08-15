@@ -314,7 +314,6 @@ def run():
             page.wait_for_load_state("networkidle", timeout=20000)
             page.wait_for_timeout(4000) 
             
-            # --- START: ULTIMATIVER REACT-SELECT KLICKER ---
             heute_calc = datetime.date.today()
             schuljahr_str = f"{heute_calc.year - 1}/{heute_calc.year}" if heute_calc.month < 8 else f"{heute_calc.year}/{heute_calc.year + 1}"
             
@@ -330,7 +329,6 @@ def run():
                         target.click(force=True)
                         page.wait_for_timeout(1000)
                         
-                        # Tippe das Schuljahr ein und drücke Enter (Der sicherste Weg für react-select!)
                         print(f"-> Tippe '{schuljahr_str}' per virtueller Tastatur...")
                         page.keyboard.type(schuljahr_str)
                         page.wait_for_timeout(500)
@@ -339,11 +337,9 @@ def run():
                 return False
 
             try:
-                # Versuch 1: Auf der Hauptseite
                 if bediene_dropdown(page):
                     erfolg = True
                 else:
-                    # Versuch 2: In den iFrames suchen
                     for f in page.frames:
                         if bediene_dropdown(f):
                             erfolg = True
@@ -357,7 +353,6 @@ def run():
                     print("❌ FEHLER: Konnte das Dropdown '.range-selector' nicht finden.")
             except Exception as drop_e:
                 print(f"❌ Ausnahme beim Dropdown-Wechsel: {drop_e}")
-            # --- ENDE: ULTIMATIVER REACT-SELECT KLICKER ---
 
             raw_homework_text = ""
             try:
@@ -407,7 +402,6 @@ def run():
                     except Exception as e:
                         print(f"Konnte Prüfung nicht auslesen: {e}")
                 
-                # --- BLÄTTER-MECHANISMUS ---
                 try:
                     next_btn = page.locator('button[data-testid="date-picker-with-arrows-next"]').first
                     if next_btn.count() > 0:
@@ -430,11 +424,36 @@ def run():
                 final_html = report_html + exams_html
             
             browser.close()
+            
+            # --- NEU: E-MAIL UND HTML-EXPORT FÜR GITHUB PAGES ---
             send_mail(final_html)
+            
+            print("Speichere HTML für GitHub Pages...")
+            webpage_html = f"""<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hausaufgaben Übersicht</title>
+    <style>
+        body {{ background-color: #121212; margin: 0; padding: 0; }}
+    </style>
+</head>
+<body>
+    {final_html}
+</body>
+</html>"""
+
+            os.makedirs("public", exist_ok=True)
+            with open("public/index.html", "w", encoding="utf-8") as f:
+                f.write(webpage_html)
             
         except Exception as e:
             print(f"Fehler bei der Browser-Navigation: {e}")
-            browser.close()
+            try:
+                browser.close()
+            except:
+                pass
 
 if __name__ == "__main__":
     run()
